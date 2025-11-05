@@ -61,35 +61,37 @@ const sendMessage = async (channelId, content) => {
     const channel = await client.channels.fetch(resolvedChannelId.trim());
     if (!channel) return console.log(`⚠️ Canal no encontrado: ${resolvedChannelId}`);
 
-    // --- Reemplazo dinámico de variables en el contenido ---
-    const finalContent = content.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-      // --- Variables especiales de días ---
-      const now = new Date();
-      const daysOfWeekES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-      const daysOfWeekEN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+    // --- Reemplazo de saltos de línea y variables en el contenido ---
+    const finalContent = content
+      .replace(/\\n/g, '\n') // convierte "\n" en saltos de línea reales
+      .replace(/\{\{(\w+)\}\}/g, (_, key) => {
+        // --- Variables especiales de días ---
+        const now = new Date();
+        const daysOfWeekES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        const daysOfWeekEN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
-      switch (key) {
-        case 'DIA_SEMANA':
-          return daysOfWeekES[now.getDay()];
-        case 'DIA_SIGUIENTE':
-          return daysOfWeekES[(now.getDay() + 1) % 7];
-        case 'DIA_SEMANA_ENG':
-          return daysOfWeekEN[now.getDay()];
-        case 'DIA_SIGUIENTE_ENG':
-          return daysOfWeekEN[(now.getDay() + 1) % 7];
-      }
+        switch (key) {
+          case 'DIA_SEMANA':
+            return daysOfWeekES[now.getDay()];
+          case 'DIA_SIGUIENTE':
+            return daysOfWeekES[(now.getDay() + 1) % 7];
+          case 'DIA_SEMANA_ENG':
+            return daysOfWeekEN[now.getDay()];
+          case 'DIA_SIGUIENTE_ENG':
+            return daysOfWeekEN[(now.getDay() + 1) % 7];
+        }
 
-      // --- Variables del bot ---
-      const value = botVariables[key];
-      if (!value) return `{{${key}}}`;
+        // --- Variables del bot ---
+        const value = botVariables[key];
+        if (!value) return `{{${key}}}`;
 
-      // --- Si la variable empieza por "role", se interpreta como un rol ---
-      if (key.toLowerCase().startsWith('role')) {
-        return `<@&${value}>`; // formato de mención a rol
-      }
+        // --- Si la variable empieza por "role", se interpreta como un rol ---
+        if (key.toLowerCase().startsWith('role')) {
+          return `<@&${value}>`; // formato de mención a rol
+        }
 
-      return value;
-    });
+        return value;
+      });
 
     await channel.send(finalContent);
     console.log(`✅ Mensaje enviado al canal ${resolvedChannelId}: ${finalContent}`);
@@ -97,6 +99,7 @@ const sendMessage = async (channelId, content) => {
     console.error(`❌ Error enviando mensaje al canal ${channelId}:`, err);
   }
 };
+
 
 
 /* // ---------------- Función para programar mensajes con cron ----------------
