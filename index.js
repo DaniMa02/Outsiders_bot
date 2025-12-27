@@ -4,11 +4,19 @@ import { listMessage } from './commands/listMessage.js';
 import { listVariable } from './commands/listVariable.js';
 import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
+
 import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 import express from 'express';
 import { query } from './db/database.js';
+
+// 🔹 NUEVO: handlers de interacciones
+import { handleHellButton } from './interactions/hellButtons.js';
+import { handleHellSelect } from './interactions/hellSelects.js';
+import { createHellEmbed } from './embeds/hellEmbed.js';
+import { syncRolesWithDatabase } from './db/syncRoles.js';
+
 
 dotenv.config();
 
@@ -48,128 +56,72 @@ const loadScheduledMessages = async () => {
   }
 };
 
-
 // ---------------- Función genérica para enviar mensajes ----------------
-
 const sendMessage = async (channelId, content) => {
   try {
-    // --- Reemplazo dinámico de variables también en el canal ---
     const resolvedChannelId = channelId.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-      return botVariables[key] || `{{${key}}}`; // si no existe la variable, deja el marcador
+      return botVariables[key] || `{{${key}}}`;
     });
 
     const channel = await client.channels.fetch(resolvedChannelId.trim());
-    if (!channel) return console.log(`⚠️ Canal no encontrado: ${resolvedChannelId}`);
+    if (!channel) return;
 
-    // --- Reemplazo de saltos de línea y variables en el contenido ---
     const finalContent = content
-      .replace(/\\n/g, '\n') // convierte "\n" en saltos de línea reales
+      .replace(/\\n/g, '\n')
       .replace(/\{\{(\w+)\}\}/g, (_, key) => {
-        // --- Variables especiales de días ---
         const now = new Date();
-        const daysOfWeekES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
-        const daysOfWeekEN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
+        const daysES = ['Domingo', 'Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado'];
+        const daysEN = ['Sunday', 'Monday', 'Tuesday', 'Wednesday', 'Thursday', 'Friday', 'Saturday'];
 
         switch (key) {
-          case 'DIA_SEMANA':
-            return daysOfWeekES[now.getDay()];
-          case 'DIA_SIGUIENTE':
-            return daysOfWeekES[(now.getDay() + 1) % 7];
-          case 'DIA_SEMANA_ENG':
-            return daysOfWeekEN[now.getDay()];
-          case 'DIA_SIGUIENTE_ENG':
-            return daysOfWeekEN[(now.getDay() + 1) % 7];
+          case 'DIA_SEMANA': return daysES[now.getDay()];
+          case 'DIA_SIGUIENTE': return daysES[(now.getDay() + 1) % 7];
+          case 'DIA_SEMANA_ENG': return daysEN[now.getDay()];
+          case 'DIA_SIGUIENTE_ENG': return daysEN[(now.getDay() + 1) % 7];
         }
 
-        // --- Variables del bot ---
         const value = botVariables[key];
         if (!value) return `{{${key}}}`;
 
-        // --- Si la variable empieza por "role", se interpreta como un rol ---
         if (key.toLowerCase().startsWith('role')) {
-          return `<@&${value}>`; // formato de mención a rol
+          return `<@&${value}>`;
         }
 
         return value;
       });
 
     await channel.send(finalContent);
-    console.log(`✅ Mensaje enviado al canal ${resolvedChannelId}: ${finalContent}`);
   } catch (err) {
-    console.error(`❌ Error enviando mensaje al canal ${channelId}:`, err);
+    console.error('❌ Error enviando mensaje:', err);
   }
 };
 
-
-
-/* // ---------------- Función para programar mensajes con cron ----------------
+// ---------------- Scheduler mensajes ----------------
 const scheduleAllMessages = () => {
-  scheduledMessages.forEach(msg => {
-    const [hour, minute] = msg.send_time.split(':');
-    const days = msg.days_of_week.split(',');
-    days.forEach(day => {
-      const cronPattern = `${minute} ${hour} * * ${day}`;
-      cron.schedule(cronPattern, () => {
-        sendMessage(msg.channel_id, msg.content);
-      });
-    });
-  });
-  console.log('🕐 Todos los mensajes programados en cron jobs');
-}; */
-// ---------------- Función para programar mensajes con cron ----------------
-const scheduleAllMessages = () => {
-  // Cancelar tareas anteriores para evitar duplicados al recargar
   cron.getTasks().forEach(task => task.stop());
 
   scheduledMessages.forEach(msg => {
-    try {
-      if (!msg.send_time || !msg.days_of_week) {
-        console.warn(`⚠️ Mensaje con ID ${msg.id} tiene hora o días vacíos, se omite.`);
-        return;
-      }
+    if (!msg.send_time || !msg.days_of_week) return;
 
-      const [hourStr, minuteStr] = msg.send_time.trim().split(':');
-      const hour = parseInt(hourStr, 10);
-      const minute = parseInt(minuteStr, 10);
+    const [hourStr, minuteStr] = msg.send_time.split(':');
+    const hour = parseInt(hourStr);
+    const minute = parseInt(minuteStr);
 
-      if (isNaN(hour) || isNaN(minute) || hour < 0 || hour > 23 || minute < 0 || minute > 59) {
-        console.error(`❌ Formato de hora inválido para el mensaje ID ${msg.id}: "${msg.send_time}"`);
-        return;
-      }
+    const cronDays = msg.days_of_week
+      .split(',')
+      .map(d => d.trim())
+      .filter(d => d !== '')
+      .join(',');
 
-      const cronDays = msg.days_of_week
-        .split(',')
-        .map(d => d.trim())
-        .filter(d => d !== '' && !isNaN(parseInt(d)))
-        .join(',');
+    const cronPattern = `${minute} ${hour} * * ${cronDays}`;
 
-      if (!cronDays) {
-        console.error(`❌ Días de la semana inválidos para mensaje ID ${msg.id}: "${msg.days_of_week}"`);
-        return;
-      }
-
-      const cronPattern = `${minute} ${hour} * * ${cronDays}`;
-
-      cron.schedule(
-        cronPattern,
-        () => {
-          sendMessage(msg.channel_id, msg.content);
-        },
-        {
-          timezone: 'Europe/Madrid' // <- Hora española, ajusta automáticamente verano/invierno
-        }
-      );
-
-      console.log(`✅ Cron creado para mensaje ID ${msg.id} (${msg.send_time} días: ${cronDays})`);
-    } catch (err) {
-      console.error(`❌ Error creando cron para mensaje ID ${msg.id}:`, err);
-    }
+    cron.schedule(cronPattern, () => {
+      sendMessage(msg.channel_id, msg.content);
+    }, { timezone: 'Europe/Madrid' });
   });
-
-  console.log('🕐 Todos los mensajes programados en cron jobs');
 };
 
-// ---------------- Comandos de Discord ----------------
+// ---------------- Comandos ----------------
 const commands = [
   addVariable,
   addMessage,
@@ -179,73 +131,7 @@ const commands = [
   deleteVariable
 ];
 
-
-
-// ---------------- Evento clientReady ----------------
-/* client.once(Events.ClientReady, async () => {
-  console.log(`✅ Bot conectado como ${client.user.tag}`);
-
-  // --- Registrar comandos aquí, después de que client.application exista ---
-  try {
-    const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-    const guildId = process.env.GUILD_ID; // <-- pon aquí el ID de tu servidor de Discord
-
-    await rest.put(
-        Routes.applicationGuildCommands(client.application.id, guildId),
-        { body: commands.map(c => c.toJSON()) }
-);
-    console.log(`✅ Comandos registrados en el servidor ${guildId}`);
-
-  } catch (err) {
-    console.error('❌ Error registrando comandos:', err);
-  }
-
-  // --- Cargar variables y mensajes ---
-  await loadBotVariables();
-  await loadScheduledMessages();
-  scheduleAllMessages();
-}); */
-
-/* // ---------------- Evento clientReady ----------------
-client.once(Events.ClientReady, async () => {
-  console.log(`✅ Bot conectado como ${client.user.tag}`);
-
-  const rest = new REST({ version: '10' }).setToken(process.env.TOKEN);
-  const guildId = process.env.GUILD_ID;
-
-  try {
-    // --- Obtener comandos actuales ---
-    const existingCommands = await rest.get(
-      Routes.applicationGuildCommands(client.application.id, guildId)
-    );
-
-    // --- Convertir tus comandos a formato JSON ---
-    const newCommands = commands.map(c => c.toJSON());
-
-    // --- Comparar para evitar duplicados ---
-    const hasChanges =
-      existingCommands.length !== newCommands.length ||
-      existingCommands.some((cmd, i) => JSON.stringify(cmd) !== JSON.stringify(newCommands[i]));
-
-    if (hasChanges) {
-      await rest.put(
-        Routes.applicationGuildCommands(client.application.id, guildId),
-        { body: newCommands.map(c => c.data.toJSON()) }
-      );
-      console.log(`✅ Comandos actualizados en el servidor ${guildId}`);
-    } else {
-      console.log('ℹ️ Los comandos ya están registrados correctamente, sin duplicados.');
-    }
-
-  } catch (err) {
-    console.error('❌ Error registrando comandos:', err);
-  }
-
-  // --- Cargar variables y mensajes ---
-  await loadBotVariables();
-  await loadScheduledMessages();
-  scheduleAllMessages();
-}); */
+// ---------------- Client Ready ----------------
 
 client.once(Events.ClientReady, async () => {
   console.log(`✅ Bot conectado como ${client.user.tag}`);
@@ -254,12 +140,12 @@ client.once(Events.ClientReady, async () => {
   const guildId = process.env.GUILD_ID;
 
   try {
-    // --- Obtener los comandos registrados actualmente ---
+    // --- Obtener comandos registrados ---
     const existingCommands = await rest.get(
       Routes.applicationGuildCommands(client.application.id, guildId)
     );
 
-    // --- Convertir tus comandos a JSON usando .data.toJSON() ---
+    // --- Convertir comandos actuales ---
     const newCommands = commands.map(c => c.data.toJSON());
 
     // --- Comparar para evitar duplicados ---
@@ -274,53 +160,87 @@ client.once(Events.ClientReady, async () => {
       );
       console.log(`✅ Comandos actualizados en el servidor ${guildId}`);
     } else {
-      console.log('ℹ️ Los comandos ya están registrados correctamente, sin duplicados.');
+      console.log('ℹ️ Comandos ya registrados, sin cambios.');
     }
 
   } catch (err) {
     console.error('❌ Error registrando comandos:', err);
   }
 
-  // --- Cargar variables y mensajes ---
+  // --- Cargar datos ---
   await loadBotVariables();
   await loadScheduledMessages();
   scheduleAllMessages();
+
+  // -----------------------
+  // 🧪 ENVÍO EMBED HELL TEST
+  // -----------------------
+  try {
+    // 👉 Usa una variable del bot o pon el ID directamente
+    const hellChannelId = botVariables.TEST_CHANNEL; // o '123456789...'
+
+    if (!hellChannelId) {
+      console.warn('⚠️ HELL_CHANNEL no está definido en bot_variables');
+      return;
+    }
+
+    const channel = await client.channels.fetch(hellChannelId);
+    if (!channel) {
+      console.warn('⚠️ Canal de Hell no encontrado');
+      return;
+    }
+
+await createHellEmbed(channel);
+
+    console.log('🔥 Embed de Hell enviado correctamente');
+
+  } catch (err) {
+    console.error('❌ Error enviando embed de Hell:', err);
+  }
+    syncRolesWithDatabase(client);
+
+  // 🔹 Llamadas periódicas cada 10 minutos
+  setInterval(() => {
+    syncRolesWithDatabase(client);
+  }, 10 * 60 * 1000); // 10 min
 });
 
 
-// ---------------- Manejo dinámico de comandos ----------------
+// ---------------- Interactions ----------------
 client.on(Events.InteractionCreate, async interaction => {
-  if (!interaction.isCommand()) return;
-
-  // 🧩 DEBUG: mostrar los comandos cargados y sus nombres
-  console.log("📦 Comandos cargados:");
-  commands.forEach((c, i) => {
-    console.log(i, c?.data?.name ?? "❌ sin data");
-  });
-
-  const command = commands.find(c => c.data.name === interaction.commandName);
-  if (!command) return;
-
   try {
-    await command.execute(interaction);
+    // Slash commands
+    if (interaction.isChatInputCommand()) {
+      const command = commands.find(c => c.data.name === interaction.commandName);
+      if (!command) return;
+      await command.execute(interaction);
+    }
+
+    // Buttons
+    else if (interaction.isButton()) {
+      await handleHellButton(interaction);
+    }
+
+    // Select menus
+    else if (interaction.isStringSelectMenu()) {
+      await handleHellSelect(interaction);
+    }
+
   } catch (err) {
-    console.error(`❌ Error ejecutando el comando ${interaction.commandName}:`, err);
-    if (interaction.deferred || interaction.replied) {
-      await interaction.editReply('❌ Error interno al ejecutar el comando.');
-    } else {
-      await interaction.reply('❌ Error interno al ejecutar el comando.');
+    console.error('❌ Error en interacción:', err);
+    if (!interaction.replied) {
+      await interaction.reply({ content: '❌ Error interno', ephemeral: true });
     }
   }
 });
 
-
-// ---------------- Express para Render ----------------
+// ---------------- Express ----------------
 const app = express();
 const PORT = process.env.PORT || 3000;
-app.get('/', (req, res) => res.send('Bot activo ✅'));
-app.listen(PORT, () => console.log(`🌐 Servidor web escuchando en puerto ${PORT}`));
+app.get('/', (_, res) => res.send('Bot activo ✅'));
+app.listen(PORT, () => console.log(`🌐 Web escuchando en ${PORT}`));
 
-// ---------------- Exportaciones para otros módulos ----------------
+// ---------------- Exports ----------------
 export { loadScheduledMessages, scheduleAllMessages, loadBotVariables };
 
 // ---------------- Login ----------------
