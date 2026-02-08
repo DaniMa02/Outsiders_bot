@@ -21,7 +21,7 @@ export const startHellScheduler = (client) => {
     async () => {
       try {
         const botVars = getBotVariables();
-        const hellChannelId = botVars.TESTP_CHANNEL;
+        const hellChannelId = botVars.HELL_CHANNEL_ID;
 
         if (!hellChannelId) {
           console.warn('⚠️ HELL_CHANNEL no definido');
