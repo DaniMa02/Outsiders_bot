@@ -158,9 +158,7 @@ if (customId === 'hell_join') {
   });
 }
 
-// =====================
-// 🔹 Botón Absence
-// =====================
+
 // =====================
 // 🔹 Botón Absence
 // =====================
@@ -202,18 +200,18 @@ if (customId === 'hell_absence') {
   // 🔔 Aviso de última hora si está CLOSED
   if (status === 'CLOSED') {
     const botVars = getBotVariables();
-    const notifyRoleId = botVars.ROLE_HELL_ADMIN;
+    const notifyRoleId = botVars.ROLE_ADMIN;
 
     const channel = await interaction.client.channels.fetch(channelId);
     if (channel) {
       await channel.send(
-        `⚠️ <@&${notifyRoleId}> **${user.username}** se ha desapuntado del Hell a última hora.`
+        `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado del Hell a última hora.`
       );
     }
   }
 
   return interaction.reply({
-    content: `❌ ${user.username}, te has marcado como **absence**.`,
+    content: `❌ ${member.displayName}, te has marcado como **absence**.`,
     ephemeral: true
   });
 }
