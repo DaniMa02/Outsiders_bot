@@ -6,6 +6,7 @@ import { query } from '../db/database.js';
 import { createOrUpdateHellEmbed } from '../services/hellEmbedService.js';
 import { getOrCreateOpenHell } from '../services/hellManager.js';
 import { getBotVariables } from '../utils/botVariables.js';
+import { GuildMember } from 'discord.js';
 
 export const handleHellButton = async (interaction) => {
   const { customId, user, guild, message } = interaction;
@@ -211,7 +212,7 @@ if (customId === 'hell_absence') {
   }
 
   return interaction.reply({
-    content: `❌ ${member.displayName}, te has marcado como **absence**.`,
+    content: `❌ ${guildMember.displayName}, te has marcado como **absence**.`,
     ephemeral: true
   });
 }
