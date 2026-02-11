@@ -40,7 +40,7 @@ export const handleHellButton = async (interaction) => {
       // //     ephemeral: true
       // //   });
       // // }
-    } else if (hellButtonIds.includes(customId) && customId === 'hell_absence') {
+    } if (hellButtonIds.includes(customId) && customId === 'hell_absence') {
       // Para absence, igual traemos los datos pero no bloqueamos
       const hellRes = await query(
         'SELECT id, status, channel_id FROM hells WHERE message_id = $1',
