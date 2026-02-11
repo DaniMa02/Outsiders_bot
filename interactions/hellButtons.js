@@ -6,10 +6,10 @@ import { query } from '../db/database.js';
 import { createOrUpdateHellEmbed } from '../services/hellEmbedService.js';
 import { getOrCreateOpenHell } from '../services/hellManager.js';
 import { getBotVariables } from '../utils/botVariables.js';
-import { GuildMember } from 'discord.js';
 
 export const handleHellButton = async (interaction) => {
   const { customId, user, guild, message } = interaction;
+  const member = interaction.member; // 👈 ESTA LÍNEA
 
   try {
     // ==================================================
@@ -92,7 +92,7 @@ export const handleHellButton = async (interaction) => {
       await setUserClass(user.id, finalClass);
 
       return interaction.reply({
-        content: `⚔️ ${user.username}, tu clase ahora es **${finalClass.replace('_', ' ')}**`,
+        content: `⚔️ ${member.displayName}, tu clase ahora es **${finalClass.replace('_', ' ')}**`,
         ephemeral: true
       });
     }
@@ -126,7 +126,7 @@ if (customId === 'hell_join') {
     await createOrUpdateHellEmbed(interaction.client, hellId);
 
     return interaction.reply({
-      content: `⚔️ ${user.username}, te has reapuntado al Hell.`,
+      content: `⚔️ ${member.displayName}, te has reapuntado al Hell.`,
       ephemeral: true
     });
   }
@@ -154,7 +154,7 @@ if (customId === 'hell_join') {
   await createOrUpdateHellEmbed(interaction.client, hellId);
 
   return interaction.reply({
-    content: `⚔️ ${user.username}, te has apuntado al Hell.`,
+    content: `⚔️ ${member.displayName}, te has apuntado al Hell.`,
     ephemeral: true
   });
 }
