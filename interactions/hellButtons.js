@@ -206,13 +206,13 @@ if (customId === 'hell_absence') {
     const channel = await interaction.client.channels.fetch(channelId);
     if (channel) {
       await channel.send(
-        `⚠️ <@&${notifyRoleId}> **${GuildMember.displayName}** se ha desapuntado del Hell a última hora.`
+        `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado del Hell a última hora.`
       );
     }
   }
 
   return interaction.reply({
-    content: `❌ ${GuildMember.displayName}, te has marcado como **absence**.`,
+    content: `❌ ${member.displayName}, te has marcado como **absence**.`,
     ephemeral: true
   });
 }
