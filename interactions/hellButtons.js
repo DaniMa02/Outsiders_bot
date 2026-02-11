@@ -1,5 +1,5 @@
 // listeners/hellButtons.js
-import { setUserClass, toggleParticipantAbsence } from '../db/hellRepository.js';
+import { setUserClass } from '../db/hellRepository.js';
 import { classRoleIds, classButtonMap, ROLE_SIN_CLASE } from '../config/classRoles.js';
 import { recalcHellAssignments } from '../services/hellService.js';
 import { query } from '../db/database.js';
@@ -9,48 +9,29 @@ import { getBotVariables } from '../utils/botVariables.js';
 
 export const handleHellButton = async (interaction) => {
   const { customId, user, guild, message } = interaction;
-  const member = interaction.member; // 👈 ESTA LÍNEA
+  const member = interaction.member;
 
   try {
-    // ==================================================
-    // 🔒 BLOQUEO POR ESTADO DEL HELL (solo join, absence)
-    // ==================================================
-    const hellButtonIds = ['hell_join', 'hell_absence'];
 
+    // 🔥 SOLUCIÓN CLAVE: reconocer interacción inmediatamente
+    await interaction.deferReply({ ephemeral: true });
+
+    const hellButtonIds = ['hell_join', 'hell_absence'];
     let hellData = null;
 
-    if (hellButtonIds.includes(customId) && customId !== 'hell_absence') {
+    // ==================================================
+    // 🔹 Obtener datos del Hell si es join o absence
+    // ==================================================
+    if (hellButtonIds.includes(customId)) {
+
       const hellRes = await query(
         'SELECT id, status, date, time_slot, channel_id FROM hells WHERE message_id = $1',
         [message.id]
       );
 
       if (hellRes.rowCount === 0) {
-        return interaction.reply({
-          content: '❌ Este Hell ya no existe.',
-          ephemeral: true
-        });
-      }
-
-      hellData = hellRes.rows[0];
-
-      // // if (hellData.status !== 'OPEN') {
-      // //   return interaction.reply({
-      // //     content: '⛔ Este Hell ya está cerrado.',
-      // //     ephemeral: true
-      // //   });
-      // // }
-    } if (hellButtonIds.includes(customId) && customId === 'hell_absence') {
-      // Para absence, igual traemos los datos pero no bloqueamos
-      const hellRes = await query(
-        'SELECT id, status, channel_id FROM hells WHERE message_id = $1',
-        [message.id]
-      );
-
-      if (hellRes.rowCount === 0) {
-        return interaction.reply({
-          content: '❌ Este Hell ya no existe.',
-          ephemeral: true
+        return interaction.editReply({
+          content: '❌ Este Hell ya no existe.'
         });
       }
 
@@ -58,15 +39,15 @@ export const handleHellButton = async (interaction) => {
     }
 
     // ================================
-    // 🔹 Botones de clase (SIN bloqueo)
+    // 🔹 Botones de clase
     // ================================
     if (customId.startsWith('class_')) {
+
       const chosenClass = classButtonMap[customId];
 
       if (!chosenClass) {
-        return interaction.reply({
-          content: '❌ Clase no válida',
-          ephemeral: true
+        return interaction.editReply({
+          content: '❌ Clase no válida'
         });
       }
 
@@ -77,7 +58,9 @@ export const handleHellButton = async (interaction) => {
         const rolesToRemove = guildMember.roles.cache.filter(role =>
           Object.values(classRoleIds).includes(role.id)
         );
-        if (rolesToRemove.size > 0) await guildMember.roles.remove(rolesToRemove);
+
+        if (rolesToRemove.size > 0)
+          await guildMember.roles.remove(rolesToRemove);
 
         const newRoleId = classRoleIds[finalClass];
         if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
@@ -91,143 +74,134 @@ export const handleHellButton = async (interaction) => {
 
       await setUserClass(user.id, finalClass);
 
-      return interaction.reply({
-        content: `⚔️ ${member.displayName}, tu clase ahora es **${finalClass.replace('_', ' ')}**`,
-        ephemeral: true
+      return interaction.editReply({
+        content: `⚔️ ${member.displayName}, tu clase ahora es **${finalClass.replace('_', ' ')}**`
       });
     }
 
     // ====================
-// 🔹 Botón Join Hell
-// ====================
-if (customId === 'hell_join') {
-  let { id: hellId, date, time_slot: timeSlot, channel_id: channelId } = hellData;
+    // 🔹 Botón Join Hell
+    // ====================
+    if (customId === 'hell_join') {
 
-  // Comprobar si el usuario ya tiene un registro
-  const participantRes = await query(`
-    SELECT id, state
-    FROM hell_participants
-    WHERE discord_id = $1 AND hell_id = $2
-  `, [user.id, hellId]);
+      let { id: hellId, date, time_slot: timeSlot, channel_id: channelId } = hellData;
 
-  if (participantRes.rowCount > 0) {
-    const participant = participantRes.rows[0];
+      const participantRes = await query(`
+        SELECT id, state
+        FROM hell_participants
+        WHERE discord_id = $1 AND hell_id = $2
+      `, [user.id, hellId]);
 
-    if (participant.state === 'ACTIVE') {
-      return interaction.reply({
-        content: '❌ Ya estás apuntado a este Hell en este horario.',
-        ephemeral: true
+      if (participantRes.rowCount > 0) {
+        const participant = participantRes.rows[0];
+
+        if (participant.state === 'ACTIVE') {
+          return interaction.editReply({
+            content: '❌ Ya estás apuntado a este Hell en este horario.'
+          });
+        }
+
+        await query(
+          `UPDATE hell_participants SET state = 'ACTIVE' WHERE id = $1`,
+          [participant.id]
+        );
+
+        await recalcHellAssignments(hellId);
+        await createOrUpdateHellEmbed(interaction.client, hellId);
+
+        return interaction.editReply({
+          content: `⚔️ ${member.displayName}, te has reapuntado al Hell.`
+        });
+      }
+
+      const countRes = await query(`
+        SELECT COUNT(*)::int AS count
+        FROM hell_participants
+        WHERE hell_id = $1 AND state = 'ACTIVE'
+      `, [hellId]);
+
+      const MAX_PARTICIPANTS = 8;
+
+      if (countRes.rows[0].count >= MAX_PARTICIPANTS) {
+        hellId = await getOrCreateOpenHell({ date, timeSlot, channelId });
+      }
+
+      await query(`
+        INSERT INTO hell_participants (hell_id, discord_id, state)
+        VALUES ($1, $2, 'ACTIVE')
+      `, [hellId, user.id]);
+
+      await recalcHellAssignments(hellId);
+      await createOrUpdateHellEmbed(interaction.client, hellId);
+
+      return interaction.editReply({
+        content: `⚔️ ${member.displayName}, te has apuntado al Hell.`
       });
     }
 
-    // 🔹 Si estaba en ABSENCE → cambiar a ACTIVE SOLO AQUÍ
-    await query(`UPDATE hell_participants SET state = 'ACTIVE' WHERE id = $1`, [participant.id]);
-    await recalcHellAssignments(hellId);
-    await createOrUpdateHellEmbed(interaction.client, hellId);
+    // =====================
+    // 🔹 Botón Absence
+    // =====================
+    if (customId === 'hell_absence') {
 
-    return interaction.reply({
-      content: `⚔️ ${member.displayName}, te has reapuntado al Hell.`,
-      ephemeral: true
-    });
-  }
+      const { id: hellId, status, channel_id: channelId } = hellData;
 
-  // Comprobar aforo
-  const countRes = await query(`
-    SELECT COUNT(*)::int AS count
-    FROM hell_participants
-    WHERE hell_id = $1 AND state = 'ACTIVE'
-  `, [hellId]);
+      const res = await query(`
+        SELECT id, state
+        FROM hell_participants
+        WHERE hell_id = $1 AND discord_id = $2
+      `, [hellId, user.id]);
 
-  const MAX_PARTICIPANTS = 8;
+      if (res.rowCount === 0) {
+        return interaction.editReply({
+          content: '❌ No estás apuntado a este Hell.'
+        });
+      }
 
-  if (countRes.rows[0].count >= MAX_PARTICIPANTS) {
-    hellId = await getOrCreateOpenHell({ date, timeSlot, channelId });
-  }
+      if (res.rows[0].state === 'ABSENCE') {
+        return interaction.editReply({
+          content: 'ℹ️ Ya estás marcado como absence.'
+        });
+      }
 
-  // Insertar participante nuevo
-  await query(`
-    INSERT INTO hell_participants (hell_id, discord_id, state)
-    VALUES ($1, $2, 'ACTIVE')
-  `, [hellId, user.id]);
+      await query(`
+        UPDATE hell_participants
+        SET state = 'ABSENCE'
+        WHERE id = $1
+      `, [res.rows[0].id]);
 
-  await recalcHellAssignments(hellId);
-  await createOrUpdateHellEmbed(interaction.client, hellId);
+      await recalcHellAssignments(hellId);
+      await createOrUpdateHellEmbed(interaction.client, hellId);
 
-  return interaction.reply({
-    content: `⚔️ ${member.displayName}, te has apuntado al Hell.`,
-    ephemeral: true
-  });
-}
+      if (status === 'CLOSED') {
+        const botVars = getBotVariables();
+        const notifyRoleId = botVars.ROLE_ADMIN;
 
+        const channel = await interaction.client.channels.fetch(channelId);
+        if (channel) {
+          await channel.send(
+            `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado del Hell a última hora.`
+          );
+        }
+      }
 
-// =====================
-// 🔹 Botón Absence
-// =====================
-if (customId === 'hell_absence') {
-  const { id: hellId, status, channel_id: channelId } = hellData;
-
-  // Obtener participante
-  const res = await query(`
-    SELECT id, state
-    FROM hell_participants
-    WHERE hell_id = $1 AND discord_id = $2
-  `, [hellId, user.id]);
-
-  if (res.rowCount === 0) {
-    return interaction.reply({
-      content: '❌ No estás apuntado a este Hell.',
-      ephemeral: true
-    });
-  }
-
-  // 🔒 Si ya está en ABSENCE → no reapuntar
-  if (res.rows[0].state === 'ABSENCE') {
-    return interaction.reply({
-      content: 'ℹ️ Ya estás marcado como absence.',
-      ephemeral: true
-    });
-  }
-
-  // 🔹 ACTIVE → ABSENCE (solo en este sentido)
-  await query(`
-    UPDATE hell_participants
-    SET state = 'ABSENCE'
-    WHERE id = $1
-  `, [res.rows[0].id]);
-
-  await recalcHellAssignments(hellId);
-  await createOrUpdateHellEmbed(interaction.client, hellId);
-
-  // 🔔 Aviso de última hora si está CLOSED
-  if (status === 'CLOSED') {
-    const botVars = getBotVariables();
-    const notifyRoleId = botVars.ROLE_ADMIN;
-
-    const channel = await interaction.client.channels.fetch(channelId);
-    if (channel) {
-      await channel.send(
-        `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado del Hell a última hora.`
-      );
+      return interaction.editReply({
+        content: `❌ ${member.displayName}, te has marcado como **absence**.`
+      });
     }
-  }
 
-  return interaction.reply({
-    content: `❌ ${member.displayName}, te has marcado como **absence**.`,
-    ephemeral: true
-  });
-}
-
-    // =====================
-    // ❓ Botón desconocido
-    // =====================
-    return interaction.reply({
-      content: '❓ Botón no reconocido',
-      ephemeral: true
+    return interaction.editReply({
+      content: '❓ Botón no reconocido'
     });
 
   } catch (err) {
     console.error('❌ Error manejando botón:', err);
-    if (!interaction.replied) {
+
+    if (interaction.deferred || interaction.replied) {
+      return interaction.editReply({
+        content: '❌ Error interno'
+      });
+    } else {
       return interaction.reply({
         content: '❌ Error interno',
         ephemeral: true
