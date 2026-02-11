@@ -34,12 +34,12 @@ export const handleHellButton = async (interaction) => {
 
       hellData = hellRes.rows[0];
 
-      if (hellData.status !== 'OPEN') {
-        return interaction.reply({
-          content: '⛔ Este Hell ya está cerrado.',
-          ephemeral: true
-        });
-      }
+      // // if (hellData.status !== 'OPEN') {
+      // //   return interaction.reply({
+      // //     content: '⛔ Este Hell ya está cerrado.',
+      // //     ephemeral: true
+      // //   });
+      // // }
     } else if (hellButtonIds.includes(customId) && customId === 'hell_absence') {
       // Para absence, igual traemos los datos pero no bloqueamos
       const hellRes = await query(
