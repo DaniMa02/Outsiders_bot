@@ -1,7 +1,7 @@
 // listeners/hellButtons.js
 import { setUserClass } from '../db/hellRepository.js';
 import { classRoleIds, classButtonMap, ROLE_SIN_CLASE } from '../config/classRoles.js';
-import { recalcHellAssignments } from '../services/hellService.js';
+import { rebalanceTimeSlot } from '../services/hellService.js';
 import { query } from '../db/database.js';
 import { createOrUpdateHellEmbed } from '../services/hellEmbedService.js';
 import { getOrCreateOpenHell } from '../services/hellManager.js';
@@ -106,7 +106,7 @@ export const handleHellButton = async (interaction) => {
           [participant.id]
         );
 
-        await recalcHellAssignments(hellId);
+        await rebalanceTimeSlot(hellId);
         await createOrUpdateHellEmbed(interaction.client, hellId);
 
         return interaction.editReply({
@@ -131,7 +131,7 @@ export const handleHellButton = async (interaction) => {
         VALUES ($1, $2, 'ACTIVE')
       `, [hellId, user.id]);
 
-      await recalcHellAssignments(hellId);
+      await rebalanceTimeSlot(hellId);
       await createOrUpdateHellEmbed(interaction.client, hellId);
 
       return interaction.editReply({
@@ -170,7 +170,7 @@ export const handleHellButton = async (interaction) => {
         WHERE id = $1
       `, [res.rows[0].id]);
 
-      await recalcHellAssignments(hellId);
+      await rebalanceTimeSlot(hellId);
       await createOrUpdateHellEmbed(interaction.client, hellId);
 
       if (status === 'CLOSED') {
