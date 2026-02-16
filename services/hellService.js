@@ -49,28 +49,28 @@ export const rebalanceTimeSlot = async (hellId) => {
 
     // 3️⃣ Obtener TODOS los participantes ACTIVE del horario
     const participantsRes = await query(`
-      SELECT discord_id, joined_at
+      SELECT id, discord_id, joined_at
       FROM hell_participants
       WHERE hell_id = ANY($1)
         AND state = 'ACTIVE'
       ORDER BY joined_at ASC
     `, [hellIds]);
 
+
+    const participants = participantsRes.rows;
     console.log("HELLS:", hellIds);
     console.log("PARTICIPANTS ACTIVE:", participants);
-    const participants = participantsRes.rows;
-
+    
     // 4️⃣ Reasignar hell_id en bloques de 8
     for (let i = 0; i < participants.length; i++) {
       const targetHellIndex = Math.floor(i / MAX_PER_HELL);
       const targetHellId = hellIds[targetHellIndex];
 
-      await query(`
-        UPDATE hell_participants
-        SET hell_id = $1
-        WHERE discord_id = $2
-          AND state = 'ACTIVE'
-      `, [targetHellId, participants[i].discord_id]);
+    await query(`
+      UPDATE hell_participants
+      SET hell_id = $1
+      WHERE id = $2
+    `, [targetHellId, participants[i].id]);
     }
 
     // 5️⃣ Eliminar hells vacíos
