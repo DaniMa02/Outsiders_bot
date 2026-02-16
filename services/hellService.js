@@ -56,6 +56,8 @@ export const rebalanceTimeSlot = async (hellId) => {
       ORDER BY joined_at ASC
     `, [hellIds]);
 
+    console.log("HELLS:", hellIds);
+    console.log("PARTICIPANTS ACTIVE:", participants);
     const participants = participantsRes.rows;
 
     // 4️⃣ Reasignar hell_id en bloques de 8
