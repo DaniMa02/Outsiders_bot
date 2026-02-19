@@ -17,7 +17,7 @@ const HELL_SCHEDULE = {
 
 export const startHellScheduler = (client) => {
   cron.schedule(
-    '25 22 * * *',
+    '45 22 * * *',
     async () => {
       try {
         const botVars = getBotVariables();
