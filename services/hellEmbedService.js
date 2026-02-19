@@ -42,10 +42,9 @@ const buildHellTitle = (dateStr, timeSlot) => {
   const dayEs = DAYS_ES[dayIndex];
   const dayEn = DAYS_EN[dayIndex];
 
-  // WEEK_20_15 → 20:15
   const hour = timeSlot.split('_').slice(-2).join(':');
 
-  return `🔥 Hell — ${dayEs} / ${dayEn} - ${hour}`;
+ return `🔥 Hell — ${dayEs} / ${dayEn} - ${hour}`;
 };
 
 /**
@@ -63,25 +62,31 @@ export const createOrUpdateHellEmbed = async (client, hellId) => {
 
   const hell = hellRes.rows[0];
 
-  // 2️⃣ Obtener participantes
+  // 2️⃣ Obtener participantes incluyendo si son replacement
   const participantsRes = await query(`
-    SELECT u.nickname, hp.state, hp.assigned_role
+    SELECT u.nickname, hp.state, hp.assigned_role, hp.is_replacement
     FROM hell_participants hp
     JOIN users u ON u.discord_id = hp.discord_id
     WHERE hp.hell_id = $1
-    ORDER BY hp.joined_at ASC
+    ORDER BY hp.slot_number ASC
   `, [hellId]);
 
   const active = [];
   const absence = [];
 
   for (const row of participantsRes.rows) {
+    // Mostrar nombre y rol
     const displayName = row.assigned_role
       ? `${row.nickname} → ${visualRoleMap[row.assigned_role] || '???'}`
       : row.nickname;
 
-    if (row.state === 'ACTIVE') active.push(displayName);
-    if (row.state === 'ABSENCE') absence.push(displayName);
+    // Añadir "(Replacement)" si corresponde
+    const replacementText = row.is_replacement ? ' (Replacement)' : '';
+
+    const nameToShow = displayName + replacementText;
+
+    if (row.state === 'ACTIVE') active.push(nameToShow);
+    if (row.state === 'ABSENCE') absence.push(nameToShow);
   }
 
   // 3️⃣ Construir textos
@@ -100,7 +105,7 @@ export const createOrUpdateHellEmbed = async (client, hellId) => {
       { name: '👥 Participantes', value: participantsText, inline: false },
       { name: '🚫 Absence', value: absenceText, inline: false }
     )
-    .setColor(0xff4d4d)
+    .setColor(0xff4d4d);
 
   // 5️⃣ Botones
   const classRow = new ActionRowBuilder().addComponents(

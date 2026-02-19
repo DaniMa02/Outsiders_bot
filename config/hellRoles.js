@@ -6,5 +6,6 @@ export const visualRoleMap = {
   HDD2: 'DD',
   HHOLY: 'Holy',
   HTANK1: 'Main Tank',
-  HTANK2: 'Second Lurer'
+  HTANK2: 'Second Lurer',
+  HHOLYLURER: 'Holy 2nd Lurer'
 };

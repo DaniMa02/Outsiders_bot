@@ -13,7 +13,6 @@ import { query } from './db/database.js';
 
 // 🔹 NUEVO: handlers de interacciones
 import { handleHellButton } from './interactions/hellButtons.js';
-import { handleHellSelect } from './interactions/hellSelects.js';
 //import { createHellEmbed } from './embeds/hellEmbed.js'; HELLEMBEDIMPORT
 // import { syncRolesWithDatabase } from './db/syncRoles.js';
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -246,11 +245,6 @@ client.on(Events.InteractionCreate, async interaction => {
       await handleHellButton(interaction);
     }
 
-    // Select menus
-    else if (interaction.isStringSelectMenu()) {
-      await handleHellSelect(interaction);
-    }
-
   } catch (err) {
     console.error('❌ Error en interacción:', err);
     if (!interaction.replied) {
@@ -261,7 +255,7 @@ client.on(Events.InteractionCreate, async interaction => {
 // ---------------- Guild Member Update ----------------
 
 client.on(Events.GuildMemberUpdate, handleGuildMemberUpdate);
-client.on(Events.GuildMemberUpdate, handleGuildMemberUpdateRoles);
+client.on(Events.GuildMemberUpdate, handleGuildMemberUpdateRoles(client));
 
 
 // ---------------- Express ----------------
