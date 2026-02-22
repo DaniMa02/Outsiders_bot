@@ -92,8 +92,6 @@ if (participant.state === 'ABSENCE') {
 
   return original_hell_id;
 }
-
-
   }
 
   // 🟢 Buscar hell abierto con hueco
