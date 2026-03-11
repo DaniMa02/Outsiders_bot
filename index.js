@@ -10,8 +10,9 @@ import dotenv from 'dotenv';
 import cron from 'node-cron';
 import express from 'express';
 import { query } from './db/database.js';
+import https from "https";
 
-// 🔹 NUEVO: handlers de interacciones
+EVO: handlers de interacciones
 import { handleHellButton } from './interactions/hellButtons.js';
 //import { createHellEmbed } from './embeds/hellEmbed.js'; HELLEMBEDIMPORT
 // import { syncRolesWithDatabase } from './db/syncRoles.js';
@@ -50,6 +51,10 @@ client.login(process.env.TOKEN)
 
 console.log("LOGIN END");
 
+https.get("https://discord.com/api/v10/gateway", res => {
+  console.log("Gateway status:", res.statusCode);
+});
+// 🔹 NU
 // ---------------- Cache ----------------
 // let botVariables = {};
 let scheduledMessages = [];
