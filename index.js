@@ -292,6 +292,7 @@ app.listen(PORT, () => console.log(`🌐 Web escuchando en ${PORT}`));
 export { loadScheduledMessages, scheduleAllMessages };
 
 // ---------------- Login ----------------
+console.log("TOKEN:", process.env.TOKEN);
 client.login(process.env.TOKEN)
   .then(() => console.log("Login success"))
   .catch(console.error);
