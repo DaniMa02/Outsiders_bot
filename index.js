@@ -252,6 +252,30 @@ client.on(Events.InteractionCreate, async interaction => {
     }
   }
 });
+
+
+// DEBUGS
+
+client.on("ready", () => {
+  console.log(`✅ Logged in as ${client.user.tag}`);
+});
+
+client.on("disconnect", () => {
+  console.log("❌ Bot disconnected");
+});
+
+client.on("reconnecting", () => {
+  console.log("🔄 Reconnecting...");
+});
+
+client.on("shardDisconnect", (event, id) => {
+  console.log("Shard disconnected", id);
+});
+
+client.on("error", console.error);
+
+
+
 // ---------------- Guild Member Update ----------------
 
 client.on(Events.GuildMemberUpdate, handleGuildMemberUpdate);
@@ -268,4 +292,6 @@ app.listen(PORT, () => console.log(`🌐 Web escuchando en ${PORT}`));
 export { loadScheduledMessages, scheduleAllMessages };
 
 // ---------------- Login ----------------
-client.login(process.env.TOKEN);
+client.login(process.env.TOKEN)
+  .then(() => console.log("Login success"))
+  .catch(console.error);
