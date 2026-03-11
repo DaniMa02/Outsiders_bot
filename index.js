@@ -287,7 +287,9 @@ client.on("shardDisconnect", (event, id) => {
 
 client.on("error", console.error);
 
-
+client.on('rateLimit', (info) => {
+  console.warn('Rate limit alcanzado:', info);
+});
 
 // ---------------- Guild Member Update ----------------
 
