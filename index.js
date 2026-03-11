@@ -41,6 +41,15 @@ const client = new Client({
   ],
 });
 
+//DEBUGG
+console.log("LOGIN START");
+
+client.login(process.env.TOKEN)
+  .then(() => console.log("Login success"))
+  .catch(console.error);
+
+console.log("LOGIN END");
+
 // ---------------- Cache ----------------
 // let botVariables = {};
 let scheduledMessages = [];
@@ -293,6 +302,6 @@ export { loadScheduledMessages, scheduleAllMessages };
 
 // ---------------- Login ----------------
 console.log("TOKEN:", process.env.TOKEN);
-client.login(process.env.TOKEN)
-  .then(() => console.log("Login success"))
-  .catch(console.error);
+//client.login(process.env.TOKEN)
+//  .then(() => console.log("Login success"))
+//  .catch(console.error);
