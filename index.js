@@ -12,7 +12,6 @@ import express from 'express';
 import { query } from './db/database.js';
 import https from "https";
 
-EVO: handlers de interacciones
 import { handleHellButton } from './interactions/hellButtons.js';
 //import { createHellEmbed } from './embeds/hellEmbed.js'; HELLEMBEDIMPORT
 // import { syncRolesWithDatabase } from './db/syncRoles.js';
