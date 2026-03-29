@@ -35,18 +35,27 @@ const DAYS_EN = [
  * Obtiene título del Hell en formato:
  * Miércoles / Wednesday - 20:15
  */
-const buildHellTitle = (dateStr, timeSlot) => {
-  const [year, month, day] = dateStr.split('-').map(Number);
-  const date = new Date(year, month - 1, day);  const dayIndex = date.getDay();
+const buildHellTitle = (dateInput, timeSlot) => {
+  let date;
+
+  if (typeof dateInput === 'string') {
+    // Si viene como string "YYYY-MM-DD"
+    const [year, month, day] = dateInput.split('-').map(Number);
+    date = new Date(year, month - 1, day);
+  } else {
+    // Si viene como Date (desde PostgreSQL)
+    date = new Date(dateInput);
+  }
+
+  const dayIndex = date.getDay();
 
   const dayEs = DAYS_ES[dayIndex];
   const dayEn = DAYS_EN[dayIndex];
 
   const hour = timeSlot.split('_').slice(-2).join(':');
 
- return `🔥 Hell — ${dayEs} / ${dayEn} - ${hour}`;
+  return `🔥 Hell — ${dayEs} / ${dayEn} - ${hour}`;
 };
-
 /**
  * Crea o actualiza el embed de un hell concreto con botones
  */
