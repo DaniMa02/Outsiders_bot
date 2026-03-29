@@ -53,7 +53,7 @@ export const initHellLifecycleScheduler = (client) => {
             SET status = 'CLOSED'
             WHERE status = 'OPEN'
               AND time_slot = $1
-              AND date = CURRENT_DATE
+              AND date = (now() AT TIME ZONE 'Europe/Madrid')::date
             RETURNING id
           `, [hell.timeSlot]);
 
@@ -83,7 +83,7 @@ export const initHellLifecycleScheduler = (client) => {
             SET status = 'FINISHED'
             WHERE status = 'CLOSED'
               AND time_slot = $1
-              AND date = CURRENT_DATE
+              AND date = (now() AT TIME ZONE 'Europe/Madrid')::date
           `, [hell.timeSlot]);
 
           if (res.rowCount > 0) {

@@ -219,7 +219,9 @@ client.once(Events.ClientReady, async () => {
   // -----------------------
 try {
   // 🔹 Obtenemos todos los Hells abiertos
-  const today = new Date().toISOString().split('T')[0];
+  const today = new Date().toLocaleDateString('en-CA', {
+    timeZone: 'Europe/Madrid'
+  });
   const openHells = await getAllOpenHells({ date: today }); // función que devuelve todos los ids de Hells OPEN
 
   if (openHells.length === 0) {

@@ -36,8 +36,8 @@ const DAYS_EN = [
  * Miércoles / Wednesday - 20:15
  */
 const buildHellTitle = (dateStr, timeSlot) => {
-  const date = new Date(dateStr);
-  const dayIndex = date.getDay();
+  const [year, month, day] = dateStr.split('-').map(Number);
+  const date = new Date(year, month - 1, day);  const dayIndex = date.getDay();
 
   const dayEs = DAYS_ES[dayIndex];
   const dayEn = DAYS_EN[dayIndex];
