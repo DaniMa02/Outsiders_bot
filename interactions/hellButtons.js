@@ -10,7 +10,15 @@ export const handleHellButton = async (interaction) => {
   const member = interaction.member;
 
   try {
-    await interaction.deferReply({ ephemeral: true });
+    // ✅ Defer seguro (evita errores si ya respondió o interacción muerta)
+    if (!interaction.deferred && !interaction.replied) {
+      try {
+        await interaction.deferReply({ ephemeral: true });
+      } catch (err) {
+        console.warn('⚠️ No se pudo hacer defer (posible interacción expirada)');
+        return;
+      }
+    }
 
     const hellButtonIds = ['hell_join', 'hell_absence'];
     let hellData = null;
@@ -23,9 +31,7 @@ export const handleHellButton = async (interaction) => {
       );
 
       if (hellRes.rowCount === 0) {
-        return interaction.editReply({
-          content: '❌ Este Hell ya no existe.'
-        });
+        return safeReply(interaction, '❌ Este Hell ya no existe.');
       }
 
       hellData = hellRes.rows[0];
@@ -35,17 +41,19 @@ export const handleHellButton = async (interaction) => {
     if (customId.startsWith('class_')) {
       const chosenClass = classButtonMap[customId];
       if (!chosenClass) {
-        return interaction.editReply({ content: '❌ Clase no válida' });
+        return safeReply(interaction, '❌ Clase no válida');
       }
 
       const guildMember = await guild.members.fetch(user.id);
+
       if (guildMember) {
         const rolesToRemove = guildMember.roles.cache.filter(role =>
           Object.values(classRoleIds).includes(role.id)
         );
 
-        if (rolesToRemove.size > 0)
+        if (rolesToRemove.size > 0) {
           await guildMember.roles.remove(rolesToRemove);
+        }
 
         const newRoleId = classRoleIds[chosenClass];
         if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
@@ -59,9 +67,10 @@ export const handleHellButton = async (interaction) => {
 
       await setUserClass(user.id, chosenClass);
 
-      return interaction.editReply({
-        content: `⚔️ ${member.displayName}, tu clase ahora es **${chosenClass.replace('_', ' ')}**`
-      });
+      return safeReply(
+        interaction,
+        `⚔️ ${member.displayName}, tu clase ahora es **${chosenClass.replace('_', ' ')}**`
+      );
     }
 
     // 🔹 Botón Join Hell
@@ -77,14 +86,13 @@ export const handleHellButton = async (interaction) => {
           client: interaction.client
         });
 
-        return interaction.editReply({
-          content: `⚔️ ${member.displayName}, te has apuntado al Hell.`
-        });
+        return safeReply(
+          interaction,
+          `⚔️ ${member.displayName}, te has apuntado al Hell.`
+        );
 
       } catch (error) {
-        return interaction.editReply({
-          content: `❌ ${error.message}`
-        });
+        return safeReply(interaction, `❌ ${error.message}`);
       }
     }
 
@@ -99,17 +107,13 @@ export const handleHellButton = async (interaction) => {
       `, [hellId, user.id]);
 
       if (res.rowCount === 0) {
-        return interaction.editReply({
-          content: '❌ No estás apuntado a este Hell.'
-        });
+        return safeReply(interaction, '❌ No estás apuntado a este Hell.');
       }
 
       const participant = res.rows[0];
 
       if (participant.state === 'ABSENCE') {
-        return interaction.editReply({
-          content: 'ℹ️ Ya estás marcado como absence.'
-        });
+        return safeReply(interaction, 'ℹ️ Ya estás marcado como absence.');
       }
 
       // 🔹 Si es replacement, primero lo devolvemos a su hell original
@@ -123,7 +127,7 @@ export const handleHellButton = async (interaction) => {
         `, [participant.id]);
       }
 
-      // 🔹 Marcar ausencia y colapsar
+      // 🔹 Marcar ausencia
       await markAbsence(participant.id, interaction.client);
 
       // 🔹 Notificación si Hell estaba cerrado
@@ -139,22 +143,31 @@ export const handleHellButton = async (interaction) => {
         }
       }
 
-      return interaction.editReply({
-        content: `❌ ${member.displayName}, te has marcado como **absence**.`
-      });
+      return safeReply(
+        interaction,
+        `❌ ${member.displayName}, te has marcado como **absence**.`
+      );
     }
 
-    return interaction.editReply({
-      content: '❓ Botón no reconocido'
-    });
+    return safeReply(interaction, '❓ Botón no reconocido');
 
   } catch (err) {
     console.error('❌ Error manejando botón:', err);
-
-    if (interaction.deferred || interaction.replied) {
-      return interaction.editReply({ content: '❌ Error interno' });
-    } else {
-      return interaction.reply({ content: '❌ Error interno', ephemeral: true });
-    }
+    return safeReply(interaction, '❌ Error interno');
   }
 };
+
+/**
+ * ✅ Función segura para responder interacciones
+ */
+async function safeReply(interaction, content) {
+  try {
+    if (interaction.deferred || interaction.replied) {
+      return await interaction.editReply({ content });
+    } else {
+      return await interaction.reply({ content, ephemeral: true });
+    }
+  } catch (err) {
+    console.warn('⚠️ No se pudo responder a la interacción (probablemente expirada)');
+  }
+}
