@@ -17,7 +17,7 @@ const HELL_SCHEDULE = {
 
 export const startHellScheduler = (client) => {
   cron.schedule(
-    '55 21 * * *', // ⬅️ cambia temporalmente esto para testear
+    '30 21 * * *', // ⬅️ cambia temporalmente esto para testear
     async () => {
       try {
         console.log('⏰ Ejecutando hellScheduler...');
