@@ -1,8 +1,8 @@
+// interactions/hellButtons.js
 import { setUserClass } from '../db/hellRepository.js';
 import { classRoleIds, classButtonMap, ROLE_SIN_CLASE } from '../config/classRoles.js';
 import { recalculateRoles, markAbsence, joinHell } from '../services/hellService.js';
 import { query } from '../db/database.js';
-import { createOrUpdateHellEmbed } from '../services/hellEmbedService.js';
 import { getBotVariables } from '../utils/botVariables.js';
 
 export const handleHellButton = async (interaction) => {
@@ -10,12 +10,10 @@ export const handleHellButton = async (interaction) => {
   const member = interaction.member;
 
   try {
-    // ✅ Defer seguro (evita errores si ya respondió o interacción muerta)
     if (!interaction.deferred && !interaction.replied) {
       try {
         await interaction.deferReply({ ephemeral: true });
-      } catch (err) {
-        console.warn('⚠️ No se pudo hacer defer (posible interacción expirada)');
+      } catch {
         return;
       }
     }
@@ -23,7 +21,6 @@ export const handleHellButton = async (interaction) => {
     const hellButtonIds = ['hell_join', 'hell_absence'];
     let hellData = null;
 
-    // 🔹 Obtener datos del Hell si es join o absence
     if (hellButtonIds.includes(customId)) {
       const hellRes = await query(
         'SELECT id, status, date, time_slot, channel_id FROM hells WHERE message_id = $1',
@@ -35,9 +32,14 @@ export const handleHellButton = async (interaction) => {
       }
 
       hellData = hellRes.rows[0];
+
+      // 🔴 BLOQUEO SI FINALIZADO
+      if (hellData.status === 'FINISHED') {
+        return safeReply(interaction, '❌ Este Hell ya ha finalizado.');
+      }
     }
 
-    // 🔹 Botones de clase
+    // 🔹 CLASES
     if (customId.startsWith('class_')) {
       const chosenClass = classButtonMap[customId];
       if (!chosenClass) {
@@ -46,23 +48,21 @@ export const handleHellButton = async (interaction) => {
 
       const guildMember = await guild.members.fetch(user.id);
 
-      if (guildMember) {
-        const rolesToRemove = guildMember.roles.cache.filter(role =>
-          Object.values(classRoleIds).includes(role.id)
-        );
+      const rolesToRemove = guildMember.roles.cache.filter(role =>
+        Object.values(classRoleIds).includes(role.id)
+      );
 
-        if (rolesToRemove.size > 0) {
-          await guildMember.roles.remove(rolesToRemove);
-        }
+      if (rolesToRemove.size > 0) {
+        await guildMember.roles.remove(rolesToRemove);
+      }
 
-        const newRoleId = classRoleIds[chosenClass];
-        if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
-          await guildMember.roles.add(newRoleId);
-        }
+      const newRoleId = classRoleIds[chosenClass];
+      if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
+        await guildMember.roles.add(newRoleId);
+      }
 
-        if (guildMember.roles.cache.has(ROLE_SIN_CLASE)) {
-          await guildMember.roles.remove(ROLE_SIN_CLASE);
-        }
+      if (guildMember.roles.cache.has(ROLE_SIN_CLASE)) {
+        await guildMember.roles.remove(ROLE_SIN_CLASE);
       }
 
       await setUserClass(user.id, chosenClass);
@@ -73,7 +73,7 @@ export const handleHellButton = async (interaction) => {
       );
     }
 
-    // 🔹 Botón Join Hell
+    // 🔹 JOIN
     if (customId === 'hell_join') {
       const { date, time_slot: timeSlot, channel_id: channelId } = hellData;
 
@@ -86,19 +86,16 @@ export const handleHellButton = async (interaction) => {
           client: interaction.client
         });
 
-        return safeReply(
-          interaction,
-          `⚔️ ${member.displayName}, te has apuntado al Hell.`
-        );
+        return safeReply(interaction, `⚔️ ${member.displayName}, te has apuntado al Hell.`);
 
       } catch (error) {
         return safeReply(interaction, `❌ ${error.message}`);
       }
     }
 
-    // 🔹 Botón Absence
+    // 🔹 ABSENCE
     if (customId === 'hell_absence') {
-      const { id: hellId, status, channel_id: channelId } = hellData;
+      const { id: hellId, date, time_slot: timeSlot, channel_id: channelId } = hellData;
 
       const res = await query(`
         SELECT id, state, is_replacement
@@ -116,7 +113,6 @@ export const handleHellButton = async (interaction) => {
         return safeReply(interaction, 'ℹ️ Ya estás marcado como absence.');
       }
 
-      // 🔹 Si es replacement, primero lo devolvemos a su hell original
       if (participant.is_replacement) {
         await query(`
           UPDATE hell_participants
@@ -127,18 +123,24 @@ export const handleHellButton = async (interaction) => {
         `, [participant.id]);
       }
 
-      // 🔹 Marcar ausencia
       await markAbsence(participant.id, interaction.client);
 
-      // 🔹 Notificación si Hell estaba cerrado
-      if (status === 'CLOSED') {
+      // 🔥 NUEVA LÓGICA: AVISO SI YA EMPEZÓ
+      const now = new Date(
+        new Date().toLocaleString('en-US', { timeZone: 'Europe/Madrid' })
+      );
+
+      const [_, hour, minute] = timeSlot.split('_');
+      const hellStart = new Date(`${date}T${hour}:${minute}:00`);
+
+      if (now >= hellStart) {
         const botVars = getBotVariables();
         const notifyRoleId = botVars.ROLE_ADMIN;
 
         const channel = await interaction.client.channels.fetch(channelId);
         if (channel) {
           await channel.send(
-            `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado del Hell a última hora.`
+            `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado tarde del Hell.`
           );
         }
       }
@@ -157,9 +159,6 @@ export const handleHellButton = async (interaction) => {
   }
 };
 
-/**
- * ✅ Función segura para responder interacciones
- */
 async function safeReply(interaction, content) {
   try {
     if (interaction.deferred || interaction.replied) {
@@ -167,7 +166,5 @@ async function safeReply(interaction, content) {
     } else {
       return await interaction.reply({ content, ephemeral: true });
     }
-  } catch (err) {
-    console.warn('⚠️ No se pudo responder a la interacción (probablemente expirada)');
-  }
+  } catch {}
 }
