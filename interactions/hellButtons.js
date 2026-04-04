@@ -1,7 +1,7 @@
 // interactions/hellButtons.js
 import { setUserClass } from '../db/hellRepository.js';
 import { classRoleIds, classButtonMap, ROLE_SIN_CLASE } from '../config/classRoles.js';
-import { recalculateRoles, markAbsence, joinHell } from '../services/hellService.js';
+import { markAbsence, joinHell } from '../services/hellService.js';
 import { query } from '../db/database.js';
 import { getBotVariables } from '../utils/botVariables.js';
 
@@ -9,149 +9,170 @@ export const handleHellButton = async (interaction) => {
   const { customId, user, guild, message } = interaction;
   const member = interaction.member;
 
+  // 🔥 LOG DEBUG (puedes quitar luego)
+  console.log('👉 CLICK:', {
+    id: interaction.id,
+    diff: Date.now() - interaction.createdTimestamp
+  });
+
   try {
+    // ✅ RESPUESTA INMEDIATA (CLAVE)
     if (!interaction.deferred && !interaction.replied) {
       try {
-        await interaction.deferReply({ ephemeral: true });
+        await interaction.deferReply({ flags: 64 });
       } catch {
+        console.warn('⚠️ Interacción expirada antes de defer');
         return;
       }
     }
 
-    const hellButtonIds = ['hell_join', 'hell_absence'];
-    let hellData = null;
-
-    if (hellButtonIds.includes(customId)) {
-      const hellRes = await query(
-        'SELECT id, status, date, time_slot, channel_id FROM hells WHERE message_id = $1',
-        [message.id]
-      );
-
-      if (hellRes.rowCount === 0) {
-        return safeReply(interaction, '❌ Este Hell ya no existe.');
-      }
-
-      hellData = hellRes.rows[0];
-
-      // 🔴 BLOQUEO SI FINALIZADO
-      if (hellData.status === 'FINISHED') {
-        return safeReply(interaction, '❌ Este Hell ya ha finalizado.');
-      }
-    }
-
-    // 🔹 CLASES
-    if (customId.startsWith('class_')) {
-      const chosenClass = classButtonMap[customId];
-      if (!chosenClass) {
-        return safeReply(interaction, '❌ Clase no válida');
-      }
-
-      const guildMember = await guild.members.fetch(user.id);
-
-      const rolesToRemove = guildMember.roles.cache.filter(role =>
-        Object.values(classRoleIds).includes(role.id)
-      );
-
-      if (rolesToRemove.size > 0) {
-        await guildMember.roles.remove(rolesToRemove);
-      }
-
-      const newRoleId = classRoleIds[chosenClass];
-      if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
-        await guildMember.roles.add(newRoleId);
-      }
-
-      if (guildMember.roles.cache.has(ROLE_SIN_CLASE)) {
-        await guildMember.roles.remove(ROLE_SIN_CLASE);
-      }
-
-      await setUserClass(user.id, chosenClass);
-
-      return safeReply(
-        interaction,
-        `⚔️ ${member.displayName}, tu clase ahora es **${chosenClass.replace('_', ' ')}**`
-      );
-    }
-
-    // 🔹 JOIN
-    if (customId === 'hell_join') {
-      const { date, time_slot: timeSlot, channel_id: channelId } = hellData;
-
+    // 🔥 TODO lo pesado se ejecuta fuera
+    setImmediate(async () => {
       try {
-        await joinHell({
-          date,
-          timeSlot,
-          discordId: user.id,
-          channelId,
-          client: interaction.client
-        });
+        const hellButtonIds = ['hell_join', 'hell_absence'];
+        let hellData = null;
 
-        return safeReply(interaction, `⚔️ ${member.displayName}, te has apuntado al Hell.`);
+        // 🔹 Obtener datos del Hell
+        if (hellButtonIds.includes(customId)) {
+          const hellRes = await query(
+            'SELECT id, status, date, time_slot, channel_id FROM hells WHERE message_id = $1',
+            [message.id]
+          );
 
-      } catch (error) {
-        return safeReply(interaction, `❌ ${error.message}`);
-      }
-    }
+          if (hellRes.rowCount === 0) {
+            return safeReply(interaction, '❌ Este Hell ya no existe.');
+          }
 
-    // 🔹 ABSENCE
-    if (customId === 'hell_absence') {
-      const { id: hellId, date, time_slot: timeSlot, channel_id: channelId } = hellData;
+          hellData = hellRes.rows[0];
 
-      const res = await query(`
-        SELECT id, state, is_replacement
-        FROM hell_participants
-        WHERE hell_id = $1 AND discord_id = $2
-      `, [hellId, user.id]);
+          // 🔴 BLOQUEO SI FINALIZADO
+          if (hellData.status === 'FINISHED') {
+            return safeReply(interaction, '❌ Este Hell ya ha finalizado.');
+          }
+        }
 
-      if (res.rowCount === 0) {
-        return safeReply(interaction, '❌ No estás apuntado a este Hell.');
-      }
+        // 🔹 CLASES
+        if (customId.startsWith('class_')) {
+          const chosenClass = classButtonMap[customId];
+          if (!chosenClass) {
+            return safeReply(interaction, '❌ Clase no válida');
+          }
 
-      const participant = res.rows[0];
+          const guildMember = await guild.members.fetch(user.id);
 
-      if (participant.state === 'ABSENCE') {
-        return safeReply(interaction, 'ℹ️ Ya estás marcado como absence.');
-      }
+          const rolesToRemove = guildMember.roles.cache.filter(role =>
+            Object.values(classRoleIds).includes(role.id)
+          );
 
-      if (participant.is_replacement) {
-        await query(`
-          UPDATE hell_participants
-          SET hell_id = original_hell_id,
-              slot_number = original_slot,
-              is_replacement = false
-          WHERE id = $1
-        `, [participant.id]);
-      }
+          if (rolesToRemove.size > 0) {
+            await guildMember.roles.remove(rolesToRemove);
+          }
 
-      await markAbsence(participant.id, interaction.client);
+          const newRoleId = classRoleIds[chosenClass];
+          if (newRoleId && !guildMember.roles.cache.has(newRoleId)) {
+            await guildMember.roles.add(newRoleId);
+          }
 
-      // 🔥 NUEVA LÓGICA: AVISO SI YA EMPEZÓ
-      const now = new Date(
-        new Date().toLocaleString('en-US', { timeZone: 'Europe/Madrid' })
-      );
+          if (guildMember.roles.cache.has(ROLE_SIN_CLASE)) {
+            await guildMember.roles.remove(ROLE_SIN_CLASE);
+          }
 
-      const [_, hour, minute] = timeSlot.split('_');
-      const hellStart = new Date(`${date}T${hour}:${minute}:00`);
+          await setUserClass(user.id, chosenClass);
 
-      if (now >= hellStart) {
-        const botVars = getBotVariables();
-        const notifyRoleId = botVars.ROLE_ADMIN;
-
-        const channel = await interaction.client.channels.fetch(channelId);
-        if (channel) {
-          await channel.send(
-            `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado tarde del Hell.`
+          return safeReply(
+            interaction,
+            `⚔️ ${member.displayName}, tu clase ahora es **${chosenClass.replace('_', ' ')}**`
           );
         }
+
+        // 🔹 JOIN
+        if (customId === 'hell_join') {
+          const { date, time_slot: timeSlot, channel_id: channelId } = hellData;
+
+          try {
+            await joinHell({
+              date,
+              timeSlot,
+              discordId: user.id,
+              channelId,
+              client: interaction.client
+            });
+
+            return safeReply(
+              interaction,
+              `⚔️ ${member.displayName}, te has apuntado al Hell.`
+            );
+
+          } catch (error) {
+            return safeReply(interaction, `❌ ${error.message}`);
+          }
+        }
+
+        // 🔹 ABSENCE
+        if (customId === 'hell_absence') {
+          const { id: hellId, date, time_slot: timeSlot, channel_id: channelId } = hellData;
+
+          const res = await query(`
+            SELECT id, state, is_replacement
+            FROM hell_participants
+            WHERE hell_id = $1 AND discord_id = $2
+          `, [hellId, user.id]);
+
+          if (res.rowCount === 0) {
+            return safeReply(interaction, '❌ No estás apuntado a este Hell.');
+          }
+
+          const participant = res.rows[0];
+
+          if (participant.state === 'ABSENCE') {
+            return safeReply(interaction, 'ℹ️ Ya estás marcado como absence.');
+          }
+
+          if (participant.is_replacement) {
+            await query(`
+              UPDATE hell_participants
+              SET hell_id = original_hell_id,
+                  slot_number = original_slot,
+                  is_replacement = false
+              WHERE id = $1
+            `, [participant.id]);
+          }
+
+          await markAbsence(participant.id, interaction.client);
+
+          // 🔥 AVISO SI YA EMPEZÓ
+          const now = new Date(
+            new Date().toLocaleString('en-US', { timeZone: 'Europe/Madrid' })
+          );
+
+          const [_, hour, minute] = timeSlot.split('_');
+          const hellStart = new Date(`${date}T${hour}:${minute}:00`);
+
+          if (now >= hellStart) {
+            const botVars = getBotVariables();
+            const notifyRoleId = botVars.ROLE_ADMIN;
+
+            const channel = await interaction.client.channels.fetch(channelId);
+            if (channel) {
+              await channel.send(
+                `⚠️ <@&${notifyRoleId}> **${member.displayName}** se ha desapuntado tarde del Hell.`
+              );
+            }
+          }
+
+          return safeReply(
+            interaction,
+            `❌ ${member.displayName}, te has marcado como **absence**.`
+          );
+        }
+
+        return safeReply(interaction, '❓ Botón no reconocido');
+
+      } catch (err) {
+        console.error('❌ Error interno en lógica async:', err);
+        return safeReply(interaction, '❌ Error interno');
       }
-
-      return safeReply(
-        interaction,
-        `❌ ${member.displayName}, te has marcado como **absence**.`
-      );
-    }
-
-    return safeReply(interaction, '❓ Botón no reconocido');
+    });
 
   } catch (err) {
     console.error('❌ Error manejando botón:', err);
@@ -164,7 +185,9 @@ async function safeReply(interaction, content) {
     if (interaction.deferred || interaction.replied) {
       return await interaction.editReply({ content });
     } else {
-      return await interaction.reply({ content, ephemeral: true });
+      return await interaction.reply({ content, flags: 64 });
     }
-  } catch {}
+  } catch {
+    console.warn('⚠️ No se pudo responder (interacción expirada)');
+  }
 }
