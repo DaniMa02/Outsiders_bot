@@ -1,5 +1,5 @@
 import { query } from '../db/database.js';
-import { createOrUpdateHellEmbed } from './hellEmbedService.js';
+import { createOrUpdateHellEmbed } from '../services/hellEmbedService.js';
 
 // -------------------- COLA DE UPDATES --------------------
 const hellUpdateQueue = new Set();
