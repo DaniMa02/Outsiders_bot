@@ -17,7 +17,7 @@ export const handleHellButton = async (interaction) => {
   try {
     if (!interaction.deferred && !interaction.replied) {
       try {
-        await interaction.deferReply({ flags: 64 });
+        await interaction.deferReply({ ephemeral: true });
       } catch {
         console.warn('⚠️ Interacción expirada antes de defer');
         return;
@@ -163,12 +163,15 @@ export const handleHellButton = async (interaction) => {
 
 async function safeReply(interaction, content) {
   try {
-    if (interaction.deferred || interaction.replied) {
+    if (interaction.deferred) {
       return await interaction.editReply({ content });
-    } else {
-      return await interaction.reply({ content, flags: 64 });
     }
-  } catch {
-    console.warn('⚠️ No se pudo responder (interacción expirada)');
+
+    if (!interaction.replied) {
+      return await interaction.reply({ content, ephemeral: true });
+    }
+
+  } catch (err) {
+    console.warn('⚠️ Fallo en safeReply:', err.message);
   }
 }
