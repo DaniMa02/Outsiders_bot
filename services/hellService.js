@@ -2,20 +2,33 @@ import { query } from '../db/database.js';
 import { createOrUpdateHellEmbed } from './hellEmbedService.js';
 
 // -------------------- COLA DE UPDATES --------------------
-const hellUpdateQueue = new Set();
+const hellUpdateQueue = [];
+let isProcessingQueue = false;
 
-async function queueHellUpdate(hellId, client) {
-  if (hellUpdateQueue.has(hellId)) return;
-  hellUpdateQueue.add(hellId);
+function queueHellUpdate(hellId, client) {
+  if (hellUpdateQueue.includes(hellId)) return;
+  hellUpdateQueue.push(hellId);
+  processQueue(client);
+}
 
-  setTimeout(async () => {
+async function processQueue(client) {
+  if (isProcessingQueue) return;
+  isProcessingQueue = true;
+
+  while (hellUpdateQueue.length > 0) {
+    const hellId = hellUpdateQueue.shift();
+
     try {
       await createOrUpdateHellEmbed(client, hellId);
     } catch (err) {
-      console.error('❌ Error en cola de Hell update:', err);
+      console.error('❌ Error en update Hell:', err);
     }
-    hellUpdateQueue.delete(hellId);
-  }, 1500); // 1.5s debounce
+
+    // 🔥 RATE LIMIT GLOBAL (CLAVE)
+    await new Promise(res => setTimeout(res, 1200));
+  }
+
+  isProcessingQueue = false;
 }
 
 // ======================================================
