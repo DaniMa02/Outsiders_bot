@@ -1,7 +1,7 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { query } from '../db/database.js';
 import { loadBotVariables, getBotVariables } from '../utils/botVariables.js';
-
+import { eventBus } from '../utils/eventBus.js';
 export const addVariable = {
   data: new SlashCommandBuilder()
     .setName('add_variable')
@@ -29,6 +29,7 @@ export const addVariable = {
 
       // 🔹 Recargar las variables del bot
       await loadBotVariables();
+      eventBus.emit('botVariableChanged', { key, value });
 
       const botVars = getBotVariables(); // Para usar si necesitas comprobar algo
 

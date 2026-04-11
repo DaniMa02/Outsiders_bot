@@ -58,22 +58,6 @@ https.get("https://discord.com/api/v10/gateway", res => {
 // let botVariables = {};
 let scheduledMessages = [];
 
-// ---------------- Funciones para la base de datos ----------------
-
-// AHORA EN utils/botVariables.js
-// const loadBotVariables = async () => {
-//   try {
-//     const res = await query('SELECT key, value FROM bot_variables');
-//     botVariables = {};
-//     res.rows.forEach(row => {
-//       botVariables[row.key] = row.value;
-//     });
-//     console.log('✅ Variables del bot cargadas:', botVariables);
-//   } catch (err) {
-//     console.error('❌ Error cargando variables del bot:', err);
-//   }
-// };
-
 const loadScheduledMessages = async () => {
   try {
     const res = await query('SELECT * FROM scheduled_messages');

@@ -1,6 +1,7 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { query } from '../db/database.js';
 import { loadBotVariables, getBotVariables } from '../utils/botVariables.js'; // ✅ Import desde utils
+import { eventBus } from '../utils/eventBus.js';
 
 export const deleteVariable = {
   data: new SlashCommandBuilder()
@@ -30,6 +31,7 @@ export const deleteVariable = {
       // 🔄 Recargar caché de variables después de eliminar
       await loadBotVariables();
 
+      eventBus.emit('botVariableChanged', { key, value: null });
       const botVars = getBotVariables(); // Opcional: usar si necesitas comprobar algo
 
       await interaction.editReply(`✅ Variable **${key}** eliminada correctamente.`);
