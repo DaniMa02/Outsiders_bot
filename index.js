@@ -5,6 +5,7 @@ import { listVariable } from './commands/listVariable.js';
 import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
 import { hellForce } from './commands/hellForce.js';
+import { hellDelete } from './commands/hellDelete.js';
 
 import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
 import dotenv from 'dotenv';
@@ -154,7 +155,8 @@ const commands = [
   listVariable,
   deleteMessage,
   deleteVariable,
-  hellForce
+  hellForce,
+  hellDelete
 ];
 
 // ---------------- Client Ready ----------------
