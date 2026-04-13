@@ -17,7 +17,24 @@ const HELL_SCHEDULE = {
 export const hellForce = {
   data: new SlashCommandBuilder()
     .setName('hell_force')
-    .setDescription('🔥 Fuerza la creación de hells manualmente (admin)'),
+    .setDescription('🔥 Fuerza creación de hells')
+    .addStringOption(o =>
+      o.setName('date')
+        .setDescription('Fecha YYYY-MM-DD')
+    )
+    .addStringOption(o =>
+      o.setName('type')
+        .setDescription('Tipo de hell')
+        .addChoices(
+          { name: 'auto', value: 'auto' },
+          { name: 'week', value: 'week' },
+          { name: 'weekend', value: 'weekend' }
+        )
+    )
+    .addStringOption(o =>
+      o.setName('slot')
+        .setDescription('Slot manual (ej: WEEK_16_15)')
+    ),
 
   async execute(interaction) {
     await interaction.deferReply({ flags: 64 });
@@ -30,37 +47,53 @@ export const hellForce = {
         return interaction.editReply('❌ HELL_CHANNEL_ID no configurado');
       }
 
-      // 📅 Función fecha España
-      function getSpainDate(offsetDays = 0) {
-        const date = new Date();
-        date.setDate(date.getDate() + offsetDays);
+      const inputDate = interaction.options.getString('date');
+      const type = interaction.options.getString('type') || 'auto';
+      const manualSlot = interaction.options.getString('slot');
 
-        return date.toLocaleDateString('en-CA', {
+      // 📅 Fecha
+      let dateStr;
+      if (inputDate) {
+        dateStr = inputDate;
+      } else {
+        const date = new Date();
+        date.setDate(date.getDate() + 1);
+        dateStr = date.toLocaleDateString('en-CA', {
           timeZone: 'Europe/Madrid'
         });
       }
 
-      const dateStr = getSpainDate(1);
+      let slots = [];
 
-      const tomorrow = new Date();
-      tomorrow.setDate(tomorrow.getDate() + 1);
-      const day = tomorrow.getDay();
+      // 🔥 MODO SLOT MANUAL
+      if (manualSlot) {
+        slots = [manualSlot];
+      } else {
+        const dateObj = new Date(dateStr);
+        const day = dateObj.getDay();
 
-      let schedule = null;
+        let schedule = null;
 
-      if (HELL_SCHEDULE.WEEK.days.includes(day)) {
-        schedule = HELL_SCHEDULE.WEEK;
-      } else if (HELL_SCHEDULE.WEEKEND.days.includes(day)) {
-        schedule = HELL_SCHEDULE.WEEKEND;
+        if (type === 'week') schedule = HELL_SCHEDULE.WEEK;
+        else if (type === 'weekend') schedule = HELL_SCHEDULE.WEEKEND;
+        else {
+          if (HELL_SCHEDULE.WEEK.days.includes(day)) {
+            schedule = HELL_SCHEDULE.WEEK;
+          } else if (HELL_SCHEDULE.WEEKEND.days.includes(day)) {
+            schedule = HELL_SCHEDULE.WEEKEND;
+          }
+        }
+
+        if (!schedule) {
+          return interaction.editReply(`❌ No hay schedule para ${dateStr}`);
+        }
+
+        slots = schedule.slots;
       }
 
-      if (!schedule) {
-        return interaction.editReply(`❌ No hay hells para el día ${day}`);
-      }
+      const created = [];
 
-      let created = [];
-
-      for (const timeSlot of schedule.slots) {
+      for (const timeSlot of slots) {
         const hellId = await getOrCreateOpenHell({
           date: dateStr,
           timeSlot,
@@ -73,12 +106,12 @@ export const hellForce = {
       }
 
       return interaction.editReply(
-        `🔥 Hells generados correctamente:\n\n${created.join('\n')}`
+        `🔥 Hells generados:\n\n${created.join('\n')}`
       );
 
     } catch (err) {
       console.error('❌ Error en hell_force:', err);
-      return interaction.editReply('❌ Error ejecutando hell_force');
+      return interaction.editReply('❌ Error ejecutando comando');
     }
   }
 };
