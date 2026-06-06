@@ -1,6 +1,6 @@
 // listeners/guildMemberUpdate.js
 import { inferClassFromDiscordRoles } from '../utils/classInference.js';
-import { setUserClass } from '../db/hellRepository.js';
+import { setUserClass } from '../db/eventRepository.js';
 import { classRoleIds, ROLE_SIN_CLASE } from '../config/classRoles.js';
 import { query } from '../db/database.js';
 

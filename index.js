@@ -1,12 +1,13 @@
+// ==================== COMANDOS ====================
 import { addMessage } from './commands/addMessage.js';
 import { addVariable } from './commands/addVariable.js';
 import { listMessage } from './commands/listMessage.js';
 import { listVariable } from './commands/listVariable.js';
 import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
-import { hellForce } from './commands/hellForce.js';
-import { hellDelete } from './commands/hellDelete.js';
+import { createEvent } from './commands/createEvent.js';
 
+// ==================== DISCORD.JS ====================
 import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
@@ -14,21 +15,21 @@ import express from 'express';
 import { query } from './db/database.js';
 import https from "https";
 
-import { handleHellButton } from './interactions/hellButtons.js';
-//import { createHellEmbed } from './embeds/hellEmbed.js'; HELLEMBEDIMPORT
-// import { syncRolesWithDatabase } from './db/syncRoles.js';
+// ==================== INTERACCIONES ====================
+import { handleEventButton } from './interactions/eventButtons.js';
+
+// ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
 import { handleGuildMemberUpdateRoles } from './listeners/guildMemberUpdateRoles.js';
 
-// Creacion de los hells automaticamente
-import { getOrCreateOpenHell, getAllOpenHells } from './services/hellManager.js';
-import { createOrUpdateHellEmbed } from './services/hellEmbedService.js';
-// Nuevas variables
+// ==================== SERVICIOS ====================
+import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
+
+// ==================== UTILITIES ====================
 import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
-// Automatizacion del envio de hell embed
-import { startHellScheduler } from './scheduler/hellScheduler.js';
-// Cambio de estados del hell
-import { initHellLifecycleScheduler, checkAndFixHellStatesOnStartup } from './scheduler/hellLifecycleScheduler.js';
+
+// ==================== SCHEDULER ====================
+import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
 
 
 dotenv.config();
@@ -55,9 +56,8 @@ console.log("LOGIN END");
 https.get("https://discord.com/api/v10/gateway", res => {
   console.log("Gateway status:", res.statusCode);
 });
-// 🔹 NU
+
 // ---------------- Cache ----------------
-// let botVariables = {};
 let scheduledMessages = [];
 
 const loadScheduledMessages = async () => {
@@ -147,16 +147,18 @@ const scheduleAllMessages = () => {
 
 
 
-// ---------------- Comandos ----------------
+// ==================== REGISTRAR COMANDOS ====================
 const commands = [
+  // Mensajes y variables
   addVariable,
   addMessage,
   listMessage,
   listVariable,
   deleteMessage,
   deleteVariable,
-  hellForce,
-  hellDelete
+
+  // Events
+  createEvent
 ];
 
 // ---------------- Client Ready ----------------
@@ -194,40 +196,14 @@ client.once(Events.ClientReady, async () => {
 
   // --- Cargar datos ---
   await loadBotVariables();
-  const botVars = getBotVariables(); // ahora todas las variables están en botVars
+  const botVars = getBotVariables();
   await loadScheduledMessages();
   scheduleAllMessages();
-  startHellScheduler(client);
-  await checkAndFixHellStatesOnStartup(client);
-  initHellLifecycleScheduler(client);
 
-
-  // -----------------------
-  // 🧪 ENVÍO EMBEDS HELL ABIERTOS
-  // -----------------------
-try {
-  // 🔹 Obtenemos todos los Hells abiertos
-  const today = new Date().toLocaleDateString('en-CA', {
-    timeZone: 'Europe/Madrid'
-  });
-  const openHells = await getAllOpenHells({ date: today }); // función que devuelve todos los ids de Hells OPEN
-
-  if (openHells.length === 0) {
-    console.log('ℹ️ No hay Hells abiertos para hoy');
-    return;
-  }
-
-  // 🔹 Iteramos y enviamos/actualizamos embeds
-  for (const hellId of openHells) {
-    await createOrUpdateHellEmbed(client, hellId);
-    console.log(`🔥 Embed de Hell ${hellId} enviado correctamente`);
-  }
-
-} catch (err) {
-  console.error('❌ Error enviando embeds de Hell abiertos:', err);
-}
-  // syncRolesWithDatabase(client);
-  // setInterval(() => { syncRolesWithDatabase(client); }, 10 * 60 * 1000);
+  // ==================== EVENTS SCHEDULER ====================
+  initEventLifecycleScheduler(client);
+  initEmbedCleanupScheduler(client);
+  await checkAndFixEventStatesOnStartup(client);
 });
 
 
@@ -245,7 +221,9 @@ client.on(Events.InteractionCreate, async interaction => {
 
     // Buttons
     else if (interaction.isButton()) {
-      await handleHellButton(interaction);
+      if (interaction.customId.startsWith('event_')) {
+        await handleEventButton(interaction);
+      }
     }
 
   } catch (err) {
@@ -298,6 +276,3 @@ export { loadScheduledMessages, scheduleAllMessages };
 
 // ---------------- Login ----------------
 console.log("TOKEN:", process.env.TOKEN);
-//client.login(process.env.TOKEN)
-//  .then(() => console.log("Login success"))
-//  .catch(console.error);

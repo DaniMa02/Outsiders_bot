@@ -1,8 +1,13 @@
 import { query } from '../db/database.js';
-import { handleHellRecalcOnRoleChange } from '../services/hellAutoRecalcOnRoleChange.js';
+import { handleEventRecalcOnRoleChange } from '../services/eventAutoRecalcOnRoleChange.js';
 
-export const hellRoleCapabilities = [
-  'HDD1','HDD2','HHOLY','HTANK1','HTANK2','HHOLYLURER'
+// Capacidades para Events (nombres de roles en Discord y en BD)
+export const eventRoleCapabilities = [
+  'HTank',
+  'HDD',
+  'HHealer',
+  'HDebuffer',
+  'HLurer'
 ];
 
 export const handleGuildMemberUpdateRoles = (client) => async (oldMember, newMember) => {
@@ -13,7 +18,7 @@ export const handleGuildMemberUpdateRoles = (client) => async (oldMember, newMem
     const newRolesSet = new Set(newMember.roles.cache.map(r => r.name));
     let capabilityChanged = false;
 
-    for (const roleName of hellRoleCapabilities) {
+    for (const roleName of eventRoleCapabilities) {
       const hadRole = oldRolesSet.has(roleName);
       const hasRole = newRolesSet.has(roleName);
 
@@ -37,9 +42,9 @@ export const handleGuildMemberUpdateRoles = (client) => async (oldMember, newMem
       }
     }
 
-    // 🔥 Recalcular hells solo si cambió alguna capability
+    // Recalcular Events si cambió capability
     if (capabilityChanged) {
-      await handleHellRecalcOnRoleChange(client, oldMember, newMember); // ✅ Pasamos client
+      await handleEventRecalcOnRoleChange(client, oldMember, newMember);
     }
 
   } catch (err) {
