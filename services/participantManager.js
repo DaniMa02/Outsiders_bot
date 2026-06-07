@@ -5,6 +5,8 @@ import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
 import {
   addParticipant,
   updateParticipantRole,
+  updateParticipantState,
+  reactivateParticipant,
   countActiveParticipantsByRole,
   countActiveParticipants
 } from '../db/eventRepository.js';
@@ -108,11 +110,14 @@ export async function addManualParticipant({ eventId, name, role }) {
 /**
  * Cambiar rol de un participante (solo entre roles del tipo de evento)
  *
+ * Si el rol destino está lleno, hace SWAP: el activo más antiguo del rol
+ * destino pasa a RESERVE y el participante pasa a ACTIVE en ese rol.
+ *
  * @param {object} params
  * @param {number} params.eventId
  * @param {number} params.participantId
  * @param {string} params.newRole
- * @returns {object} participante actualizado
+ * @returns {object} resultado del cambio
  */
 export async function changeParticipantRole({ eventId, participantId, newRole }) {
   const event = await getEvent(eventId);
@@ -148,15 +153,44 @@ export async function changeParticipantRole({ eventId, participantId, newRole })
     throw new Error(`❌ El participante ya está en el rol ${newRole.toUpperCase()}.`);
   }
 
-  // Bloquear si rol destino lleno
+  // Comprobar si el rol destino está lleno
   const countForRole = await countActiveParticipantsByRole(eventId, newRole);
-  if (countForRole >= config.max_roles[newRole]) {
-    throw new Error(`❌ El rol ${newRole.toUpperCase()} está lleno.`);
+  const isFull = countForRole >= config.max_roles[newRole];
+
+  if (!isFull) {
+    // El rol tiene espacio: mover y asegurar estado ACTIVE
+    await reactivateParticipant({ participantId, state: PARTICIPANT_STATES.ACTIVE, assignedRole: newRole });
+    console.log(`🔄 Participante ${participantId} → ACTIVE en ${newRole} (espacio libre)`);
+    return { swapped: false, participantId, newRole };
   }
 
-  const updated = await updateParticipantRole(participantId, newRole);
+  // El rol está lleno: hacer SWAP
+  // Buscar el activo más antiguo en el rol destino (el que se quedará sin sitio)
+  const activeInRole = await query(`
+    SELECT id
+    FROM event_participants
+    WHERE event_id = $1 AND assigned_role = $2 AND state = 'ACTIVE'
+    ORDER BY joined_at ASC
+    LIMIT 1
+  `, [eventId, newRole]);
 
-  console.log(`🔄 Participante ${participantId} cambiado a rol ${newRole} en evento ${eventId}`);
+  if (activeInRole.rowCount === 0) {
+    throw new Error(`❌ El rol ${newRole.toUpperCase()} está lleno pero no hay activos para intercambiar.`);
+  }
 
-  return updated;
+  const displacedId = activeInRole.rows[0].id;
+
+  if (displacedId === participantId) {
+    throw new Error(`❌ El participante ya está activo en ${newRole.toUpperCase()}.`);
+  }
+
+  // 1. Mover al participante al nuevo rol y asegurar estado ACTIVE
+  await reactivateParticipant({ participantId, state: PARTICIPANT_STATES.ACTIVE, assignedRole: newRole });
+
+  // 2. El desplazado pasa a RESERVE (en el mismo rol)
+  await updateParticipantState(displacedId, PARTICIPANT_STATES.RESERVE);
+
+  console.log(`🔄 Swap: participante ${displacedId} → RESERVE en ${newRole}, participante ${participantId} → ACTIVE en ${newRole}`);
+
+  return { swapped: true, participantId, newRole, displacedId };
 }

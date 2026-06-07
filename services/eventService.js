@@ -304,6 +304,31 @@ export async function getEventParticipantsSummary(eventId) {
 }
 
 /**
+ * Obtener todos los participantes de un evento con su posición global
+ * (orden de inscripción, basado en joined_at ASC).
+ *
+ * La posición es estable: si un usuario se apunta, marca absence, y
+ * vuelve a apuntarse, su posición NO cambia (joined_at no se actualiza).
+ *
+ * @param {number} eventId
+ * @returns {Promise<Array>} Lista de participantes con campo `position`
+ */
+export async function getAllEventParticipantsWithPosition(eventId) {
+  const res = await query(`
+    SELECT
+      ep.id, ep.state, ep.assigned_role, ep.joined_at,
+      u.discord_id, u.nickname,
+      ROW_NUMBER() OVER (ORDER BY ep.joined_at ASC) AS position
+    FROM event_participants ep
+    LEFT JOIN users u ON u.discord_id = ep.discord_id
+    WHERE ep.event_id = $1
+    ORDER BY ep.joined_at ASC
+  `, [eventId]);
+
+  return res.rows;
+}
+
+/**
  * Agrupar participantes por rol
  */
 function groupByRole(participants) {

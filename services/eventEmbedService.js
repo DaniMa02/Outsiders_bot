@@ -7,7 +7,7 @@ import {
 } from 'discord.js';
 import { query } from '../db/database.js';
 import { getEvent, formatEventInfo } from './eventManager.js';
-import { getEventParticipantsSummary } from './eventService.js';
+import { getEventParticipantsSummary, getAllEventParticipantsWithPosition } from './eventService.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { getBotVariables } from '../utils/botVariables.js';
@@ -30,14 +30,21 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     // 1️⃣ Obtener evento y sus participantes
     const event = await getEvent(eventId);
     const summary = await getEventParticipantsSummary(eventId);
+    const allParticipants = await getAllEventParticipantsWithPosition(eventId);
     const config = EVENT_CONFIG[event.type];
+
+    // Mapa id -> posición (1-based, según joined_at ASC)
+    const positionById = new Map();
+    for (const p of allParticipants) {
+      positionById.set(p.id, p.position);
+    }
 
     // 2️⃣ Construir embed según tipo
     let embed;
     if (config.roles_required) {
-      embed = buildEmbedWithRoles(event, summary, config);
+      embed = buildEmbedWithRoles(event, summary, config, positionById);
     } else {
-      embed = buildEmbedNoRoles(event, summary, config);
+      embed = buildEmbedNoRoles(event, summary, config, positionById);
     }
 
     // 3️⃣ Construir botones
@@ -89,6 +96,36 @@ function buildNotifyContent(config) {
 }
 
 /**
+ * Icono de posición: 🥇🥈🥉 para top 3, (X) para el resto
+ */
+function getPositionIcon(position) {
+  if (position === 1) return '🥇';
+  if (position === 2) return '🥈';
+  if (position === 3) return '🥉';
+  return `(${position})`;
+}
+
+/**
+ * Sufijo 🐐 si el participante es THE GOAT (configurado en GOAT_USER_ID)
+ */
+function getGoatSuffix(discordId) {
+  const botVars = getBotVariables();
+  const goatId = botVars.GOAT_USER_ID;
+  if (goatId && discordId === goatId) return ' 🐐';
+  return '';
+}
+
+/**
+ * Formatea una línea de participante: nombre + posición + 🐐 (si aplica)
+ */
+function formatParticipantLine(p, position) {
+  const name = p.nickname || `<@${p.discord_id}>`;
+  const posIcon = getPositionIcon(position);
+  const goat = getGoatSuffix(p.discord_id);
+  return `${name} ${posIcon}${goat}`;
+}
+
+/**
  * Enviar nuevo mensaje con embed
  */
 async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content = null) {
@@ -110,7 +147,7 @@ async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content 
 /**
  * Construir embed para evento con roles (Hell, Hardcore)
  */
-function buildEmbedWithRoles(event, summary, config) {
+function buildEmbedWithRoles(event, summary, config, positionById) {
   const eventTime = new Date(event.datetime).toLocaleString('es-ES', {
     weekday: 'long',
     year: 'numeric',
@@ -127,7 +164,7 @@ function buildEmbedWithRoles(event, summary, config) {
     .setColor(config.color);
 
   // Sección ACTIVOS
-  const activeText = buildActiveParticipantsWithRoles(summary.active);
+  const activeText = buildActiveLinesWithRoles(summary.active, positionById);
   const maxPlayers = config.max_players;
   const activeCount = summary.active.count;
 
@@ -137,11 +174,9 @@ function buildEmbedWithRoles(event, summary, config) {
     inline: false
   });
 
-  // Sección RESERVAS
+  // Sección RESERVAS (con rol)
   if (summary.reserve.count > 0) {
-    const reserveText = summary.reserve.participants
-      .map(p => `• ${p.nickname || `<@${p.discord_id}>`}`)
-      .join('\n');
+    const reserveText = buildReserveLinesWithRoles(summary.reserve, positionById);
 
     embed.addFields({
       name: `📋 RESERVAS (${summary.reserve.count})`,
@@ -172,29 +207,52 @@ function buildEmbedWithRoles(event, summary, config) {
 }
 
 /**
- * Construir texto de participantes activos organizados por rol
+ * Construir líneas de activos con roles: una línea por participante
  */
-function buildActiveParticipantsWithRoles(activeSummary) {
-  if (activeSummary.count === 0) {
-    return '_Sin participantes_';
-  }
+function buildActiveLinesWithRoles(activeSummary, positionById) {
+  if (activeSummary.count === 0) return '_Sin participantes_';
 
   const lines = [];
 
   for (const [role, participants] of Object.entries(activeSummary.byRole)) {
-    if (role === 'null' || role === null) continue; // Ignorar nulos
+    if (role === 'null' || role === null) continue;
 
     const emoji = ROLE_EMOJIS[role] || '❓';
     const roleName = ROLE_NAMES[role] || role;
 
-    const names = participants
-      .map(p => p.nickname || `<@${p.discord_id}>`)
-      .join(', ');
-
-    lines.push(`${emoji} ${roleName}: ${names}`);
+    for (const p of participants) {
+      const position = positionById.get(p.id) || '?';
+      const participantLine = formatParticipantLine(p, position);
+      lines.push(`${emoji} ${roleName}: ${participantLine}`);
+    }
   }
 
   return lines.length > 0 ? lines.join('\n') : '_Sin participantes_';
+}
+
+/**
+ * Construir líneas de reservas con roles: una línea por participante,
+ * mostrando el rol con el que se apuntó.
+ */
+function buildReserveLinesWithRoles(reserveSummary, positionById) {
+  if (reserveSummary.count === 0) return null;
+
+  const lines = [];
+
+  for (const p of reserveSummary.participants) {
+    const position = positionById.get(p.id) || '?';
+    const participantLine = formatParticipantLine(p, position);
+
+    if (p.assigned_role) {
+      const emoji = ROLE_EMOJIS[p.assigned_role] || '❓';
+      const roleName = ROLE_NAMES[p.assigned_role] || p.assigned_role;
+      lines.push(`${emoji} ${roleName}: ${participantLine}`);
+    } else {
+      lines.push(participantLine);
+    }
+  }
+
+  return lines.join('\n');
 }
 
 // ==================== CONSTRUIR EMBED (SIN ROLES) ====================
@@ -202,7 +260,7 @@ function buildActiveParticipantsWithRoles(activeSummary) {
 /**
  * Construir embed para evento sin roles (Raid)
  */
-function buildEmbedNoRoles(event, summary, config) {
+function buildEmbedNoRoles(event, summary, config, positionById) {
   const eventTime = new Date(event.datetime).toLocaleString('es-ES', {
     weekday: 'long',
     year: 'numeric',
@@ -218,29 +276,39 @@ function buildEmbedNoRoles(event, summary, config) {
     .setDescription(`📅 ${eventTime}`)
     .setColor(config.color);
 
-  // Sección PARTICIPANTES
-  const participantsText = summary.active.participants
-    .map((p, idx) => `${idx + 1}. ${p.nickname || `<@${p.discord_id}>`}`)
-    .join('\n') || '_Sin participantes_';
-
   const maxPlayers = config.max_players;
   const activeCount = summary.active.count;
 
-  embed.addFields({
-    name: `👥 PARTICIPANTES (${activeCount}${maxPlayers ? `/${maxPlayers}` : ''})`,
-    value: participantsText,
-    inline: false
-  });
+  // Sección PARTICIPANTES
+  if (activeCount > 0) {
+    const lines = summary.active.participants.map(p => {
+      const position = positionById.get(p.id) || '?';
+      return formatParticipantLine(p, position);
+    });
+
+    embed.addFields({
+      name: `👥 PARTICIPANTES (${activeCount}${maxPlayers ? `/${maxPlayers}` : ''})`,
+      value: lines.join('\n'),
+      inline: false
+    });
+  } else {
+    embed.addFields({
+      name: `👥 PARTICIPANTES (0${maxPlayers ? `/${maxPlayers}` : ''})`,
+      value: '_Sin participantes_',
+      inline: false
+    });
+  }
 
   // Sección RESERVAS
   if (summary.reserve.count > 0) {
-    const reserveText = summary.reserve.participants
-      .map((p, idx) => `${idx + 1}. ${p.nickname || `<@${p.discord_id}>`}`)
-      .join('\n');
+    const lines = summary.reserve.participants.map(p => {
+      const position = positionById.get(p.id) || '?';
+      return formatParticipantLine(p, position);
+    });
 
     embed.addFields({
       name: `📋 RESERVAS (${summary.reserve.count})`,
-      value: reserveText,
+      value: lines.join('\n'),
       inline: false
     });
   }
@@ -258,7 +326,6 @@ function buildEmbedNoRoles(event, summary, config) {
     });
   }
 
-  // Footer
   embed.setFooter({
     text: `Estado: ${event.status}`
   });
