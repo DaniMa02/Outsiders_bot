@@ -2,9 +2,9 @@
 import { SlashCommandBuilder } from 'discord.js';
 import { getEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
-import { query } from '../db/database.js';
 import { EVENT_CONFIG, EVENT_STATES } from '../config/eventConfig.js';
 import { getBotVariables } from '../utils/botVariables.js';
+import { getOpenEventsFromCache } from '../utils/eventCache.js';
 
 /**
  * COMANDO: /restore_event
@@ -80,39 +80,37 @@ export const restoreEvent = {
 
   autocomplete: async (interaction) => {
     try {
-      const focused = interaction.options.getFocused() || '';
+      const focused = (interaction.options.getFocused() || '').toLowerCase();
 
-      const res = await query(
-        `SELECT id, type, title, datetime
-         FROM events
-         WHERE status = 'OPEN'
-         ORDER BY datetime ASC
-         LIMIT 25`
-      );
+      const choices = getOpenEventsFromCache()
+        .filter(e => e && e.id != null && e.title && e.datetime && e.type)
+        .map(e => {
+          const dateStr = new Date(e.datetime).toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Europe/Madrid'
+          });
+          const label = EVENT_CONFIG[e.type]?.label || e.type;
+          return {
+            name: `[${label}] ${e.title} — ${dateStr}`.slice(0, 100),
+            value: String(e.id)
+          };
+        })
+        .filter(c => c.name.toLowerCase().includes(focused))
+        .slice(0, 25);
 
-      const choices = res.rows.map(e => {
-        const dateStr = new Date(e.datetime).toLocaleString('es-ES', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: 'Europe/Madrid'
-        });
-        const label = EVENT_CONFIG[e.type]?.label || e.type;
-        return {
-          name: `[${label}] ${e.title} — ${dateStr}`,
-          value: String(e.id)
-        };
-      });
-
-      const filtered = choices.filter(c =>
-        c.name.toLowerCase().includes(focused.toLowerCase())
-      );
-
-      await interaction.respond(filtered.slice(0, 25));
+      try {
+        await interaction.respond(choices);
+      } catch (respondErr) {
+        console.error('❌ Error al responder autocomplete:', respondErr);
+      }
     } catch (err) {
-      console.error('❌ Error en autocomplete de restore_event:', err);
-      await interaction.respond([]);
+      console.error('❌ Error en autocomplete de restore_event:', err.message, err.stack);
+      try {
+        await interaction.respond([]);
+      } catch {}
     }
   }
 };

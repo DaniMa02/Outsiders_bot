@@ -8,6 +8,7 @@ import {
   deleteEvent as deleteEventDB
 } from '../db/eventRepository.js';
 import { EVENT_CONFIG, EVENT_STATES, EMBED_DELETE_DELAY_MS, isValidEventType } from '../config/eventConfig.js';
+import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
 
 /**
  * GESTOR DE EVENTOS
@@ -56,6 +57,9 @@ export async function createEvent({ type, title, datetime, channelId, createdBy 
     channelId,
     createdBy
   });
+
+  // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
+  addEventToCache({ ...event, status: 'OPEN' });
 
   console.log(`✅ Evento creado: ${event.id} - ${type} "${title}" - ${eventDate.toLocaleString()}`);
 
@@ -138,6 +142,13 @@ export async function updateEventStatus(eventId, status) {
 
   const updated = await updateEventStatusDB(eventId, status);
 
+  // Mantener caché sincronizado
+  if (status === 'FINISHED' || status === 'CLOSED') {
+    removeEventFromCache(eventId);
+  } else if (status === 'OPEN') {
+    addEventToCache(updated);
+  }
+
   console.log(`🔄 Estado de evento ${eventId} cambiado: ${event.status} → ${status}`);
 
   return updated;
@@ -154,6 +165,9 @@ export async function finishEvent(eventId, client) {
   }
 
   await updateEventStatus(eventId, EVENT_STATES.FINISHED);
+
+  // Limpiar caché (el evento ya no es OPEN)
+  removeEventFromCache(eventId);
 
   console.log(`⏰ Evento ${eventId} finalizado (status = FINISHED)`);
 
@@ -187,6 +201,9 @@ export async function deleteEvent(eventId, client) {
 
   // Eliminar evento de BD (elimina participantes automáticamente por FK)
   await deleteEventDB(eventId);
+
+  // Limpiar caché
+  removeEventFromCache(eventId);
 
   console.log(`✅ Evento ${eventId} eliminado`);
 }

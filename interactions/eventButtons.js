@@ -435,20 +435,18 @@ async function handleManualMoveButton(interaction, eventData) {
 
 /**
  * Manejar envío de modales de gestión manual
- * customId: event_modal_add:<eventId> o event_modal_move:<eventId>
+ * customId: event_modal_add:<eventId> | event_modal_move:<eventId>
  */
 export const handleEventModalSubmit = async (interaction) => {
   const { customId } = interaction;
 
-  if (!customId.startsWith('event_modal_')) return;
-
-  const parts = customId.split(':');
-  if (parts.length !== 2) {
+  const match = customId.match(/^event_modal_(add|move):(\d+)$/);
+  if (!match) {
     return safeReplyModal(interaction, '❌ Modal mal formado.');
   }
 
-  const [, action] = parts;
-  const eventId = parseInt(parts[1], 10);
+  const [, action, eventIdStr] = match;
+  const eventId = parseInt(eventIdStr, 10);
 
   if (isNaN(eventId)) {
     return safeReplyModal(interaction, '❌ ID de evento inválido.');
