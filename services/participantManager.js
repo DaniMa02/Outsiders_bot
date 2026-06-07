@@ -71,11 +71,12 @@ export async function addManualParticipant({ eventId, name, role }) {
   }
 
   // Crear/recuperar user con fake ID
+  // class = NULL porque los manuales no tienen clase inferida de roles de Discord
   await query(`
-    INSERT INTO users (discord_id, nickname)
-    VALUES ($1, $2)
+    INSERT INTO users (discord_id, nickname, class)
+    VALUES ($1, $2, $3)
     ON CONFLICT (discord_id) DO UPDATE SET nickname = EXCLUDED.nickname
-  `, [fakeId, trimmedName]);
+  `, [fakeId, trimmedName, null]);
 
   // Determinar estado según cupos
   let state = PARTICIPANT_STATES.ACTIVE;

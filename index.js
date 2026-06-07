@@ -223,6 +223,14 @@ client.on(Events.InteractionCreate, async interaction => {
       await command.execute(interaction);
     }
 
+    // Autocomplete (de slash commands)
+    else if (interaction.isAutocomplete()) {
+      const command = commands.find(c => c.data.name === interaction.commandName);
+      if (command?.autocomplete) {
+        await command.autocomplete(interaction);
+      }
+    }
+
     // Buttons
     else if (interaction.isButton()) {
       if (interaction.customId.startsWith('event_')) {
