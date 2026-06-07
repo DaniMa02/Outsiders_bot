@@ -146,11 +146,12 @@ export async function getParticipantsByState(eventId, state) {
 
 /**
  * Contar participantes activos por rol
+ * Usa LOWER() para evitar inconsistencias por mayúsculas/minúsculas
  */
 export async function countActiveParticipantsByRole(eventId, role) {
   const res = await query(
-    `SELECT COUNT(*)::int as count FROM event_participants 
-     WHERE event_id = $1 AND state = $2 AND assigned_role = $3`,
+    `SELECT COUNT(*)::int as count FROM event_participants
+     WHERE event_id = $1 AND state = $2 AND LOWER(assigned_role) = LOWER($3)`,
     [eventId, 'ACTIVE', role]
   );
   return res.rows[0].count;
@@ -170,13 +171,15 @@ export async function countActiveParticipants(eventId) {
 
 /**
  * Agregar participante a evento
+ * Normaliza el rol a minúsculas para evitar inconsistencias
  */
 export async function addParticipant({ eventId, discordId, state = 'ACTIVE', assignedRole = null }) {
+  const normalizedRole = assignedRole ? assignedRole.toLowerCase() : null;
   const res = await query(
     `INSERT INTO event_participants (event_id, discord_id, state, assigned_role, joined_at)
      VALUES ($1, $2, $3, $4, NOW())
      RETURNING *`,
-    [eventId, discordId, state, assignedRole]
+    [eventId, discordId, state, normalizedRole]
   );
   return res.rows[0];
 }
@@ -194,25 +197,29 @@ export async function updateParticipantState(participantId, newState) {
 
 /**
  * Reactivar participante (ABSENCE → ACTIVE/RESERVE) actualizando estado y rol
+ * Normaliza el rol a minúsculas
  */
 export async function reactivateParticipant({ participantId, state, assignedRole }) {
+  const normalizedRole = assignedRole ? assignedRole.toLowerCase() : null;
   const res = await query(
     `UPDATE event_participants
      SET state = $1, assigned_role = $2
      WHERE id = $3
      RETURNING *`,
-    [state, assignedRole, participantId]
+    [state, normalizedRole, participantId]
   );
   return res.rows[0];
 }
 
 /**
  * Actualizar rol asignado a participante
+ * Normaliza el rol a minúsculas
  */
 export async function updateParticipantRole(participantId, role) {
+  const normalizedRole = role ? role.toLowerCase() : null;
   const res = await query(
     `UPDATE event_participants SET assigned_role = $1 WHERE id = $2 RETURNING *`,
-    [role, participantId]
+    [normalizedRole, participantId]
   );
   return res.rows[0];
 }

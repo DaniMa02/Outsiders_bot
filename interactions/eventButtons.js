@@ -11,6 +11,7 @@ import { getUserCapabilities } from '../db/eventRepository.js';
 import { canUserFulfillRole } from '../config/eventRoleMapping.js';
 import { joinEvent, markEventAbsence } from '../services/eventService.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
+import { getEvent } from '../services/eventManager.js';
 import { getBotVariables } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole } from '../services/participantManager.js';
 import { EVENT_CONFIG } from '../config/eventConfig.js';
