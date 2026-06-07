@@ -12,6 +12,7 @@ export const EVENT_CONFIG = {
     icon: '🔥',
     label: 'Hell',
     channel_var: 'HELL_CHANNEL_ID',
+    notify_role_var: 'HELL_NOTIFY_ROLE_ID',
     max_players: 5,
     roles_required: true,
     max_roles: {
@@ -28,6 +29,7 @@ export const EVENT_CONFIG = {
     icon: '⚔️',
     label: 'Hardcore',
     channel_var: 'HARDCORE_CHANNEL_ID',
+    notify_role_var: 'HARDCORE_NOTIFY_ROLE_ID',
     max_players: 8,
     roles_required: true,
     max_roles: {
@@ -45,6 +47,7 @@ export const EVENT_CONFIG = {
     icon: '👑',
     label: 'Raid',
     channel_var: 'RAID_CHANNEL_ID',
+    notify_role_var: 'RAID_NOTIFY_ROLE_ID',
     max_players: null, // ilimitado
     roles_required: false,
     max_roles: {},

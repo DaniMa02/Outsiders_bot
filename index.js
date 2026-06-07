@@ -6,6 +6,7 @@ import { listVariable } from './commands/listVariable.js';
 import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
 import { createEvent } from './commands/createEvent.js';
+import { restoreEvent } from './commands/restoreEvent.js';
 
 // ==================== DISCORD.JS ====================
 import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
@@ -16,7 +17,7 @@ import { query } from './db/database.js';
 import https from "https";
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -158,7 +159,8 @@ const commands = [
   deleteVariable,
 
   // Events
-  createEvent
+  createEvent,
+  restoreEvent
 ];
 
 // ---------------- Client Ready ----------------
@@ -223,6 +225,13 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction.isButton()) {
       if (interaction.customId.startsWith('event_')) {
         await handleEventButton(interaction);
+      }
+    }
+
+    // Modal submits (gestión manual de eventos)
+    else if (interaction.isModalSubmit()) {
+      if (interaction.customId.startsWith('event_modal_')) {
+        await handleEventModalSubmit(interaction);
       }
     }
 

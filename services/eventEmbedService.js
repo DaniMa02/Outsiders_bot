@@ -10,6 +10,7 @@ import { getEvent, formatEventInfo } from './eventManager.js';
 import { getEventParticipantsSummary } from './eventService.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
+import { getBotVariables } from '../utils/botVariables.js';
 
 /**
  * SERVICIO DE EMBEDS DE EVENTOS
@@ -49,6 +50,10 @@ export async function createOrUpdateEventEmbed(client, eventId) {
       return;
     }
 
+    // El content con mención al rol solo se incluye en envíos NUEVOS,
+    // no en edits (para no re-pingear al rol en cada update)
+    const notifyContent = buildNotifyContent(config);
+
     if (event.message_id) {
       try {
         const message = await channel.messages.fetch(event.message_id);
@@ -59,10 +64,10 @@ export async function createOrUpdateEventEmbed(client, eventId) {
         console.log(`✏️ Embed actualizado para evento ${eventId}`);
       } catch (err) {
         console.warn(`⚠️ No se pudo editar mensaje, enviando nuevo:`, err.message);
-        await sendNewEmbedMessage(channel, embed, buttonRows, eventId);
+        await sendNewEmbedMessage(channel, embed, buttonRows, eventId, notifyContent);
       }
     } else {
-      await sendNewEmbedMessage(channel, embed, buttonRows, eventId);
+      await sendNewEmbedMessage(channel, embed, buttonRows, eventId, notifyContent);
     }
   } catch (err) {
     console.error(`❌ Error al crear/actualizar embed para evento ${eventId}:`, err);
@@ -70,13 +75,30 @@ export async function createOrUpdateEventEmbed(client, eventId) {
 }
 
 /**
+ * Construir content con mención al rol de notificación
+ * Devuelve null si no hay rol configurado
+ */
+function buildNotifyContent(config) {
+  if (!config || !config.notify_role_var) return null;
+
+  const botVars = getBotVariables();
+  const roleId = botVars[config.notify_role_var];
+  if (!roleId) return null;
+
+  return `<@&${roleId}>`;
+}
+
+/**
  * Enviar nuevo mensaje con embed
  */
-async function sendNewEmbedMessage(channel, embed, buttonRows, eventId) {
-  const msg = await channel.send({
+async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content = null) {
+  const payload = {
     embeds: [embed],
     components: buttonRows
-  });
+  };
+  if (content) payload.content = content;
+
+  const msg = await channel.send(payload);
 
   // Guardar message_id en BD
   await query('UPDATE events SET message_id = $1 WHERE id = $2', [msg.id, eventId]);
@@ -291,6 +313,29 @@ function buildEventButtons(event, config) {
         .setStyle(ButtonStyle.Danger)
     );
     rows.push(joinAbsenceRow);
+  }
+
+  // Gestión manual (solo usable por Admin/Líder de Grupo, validado en el handler)
+  if (config.roles_required) {
+    const manualRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('event_manual_add')
+        .setLabel('➕ Añadir manual')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('event_manual_move')
+        .setLabel('✏️ Mover rol')
+        .setStyle(ButtonStyle.Secondary)
+    );
+    rows.push(manualRow);
+  } else {
+    const manualRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('event_manual_add')
+        .setLabel('➕ Añadir manual')
+        .setStyle(ButtonStyle.Secondary)
+    );
+    rows.push(manualRow);
   }
 
   return rows;
