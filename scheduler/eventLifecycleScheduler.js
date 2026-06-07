@@ -207,3 +207,44 @@ export const checkAndFixEventStatesOnStartup = async (client) => {
     console.error('❌ Error en checkAndFixEventStatesOnStartup:', err);
   }
 };
+
+// ==================== SHADOW TOWER DIARIO ====================
+
+/**
+ * Recordatorio diario para Shadow Tower (21:30).
+ * Envía un mensaje al canal configurado con la mención al rol @Miembros
+ * 10 minutos antes del evento.
+ *
+ * Variables requeridas:
+ *   SHADOW_TOWER_CHANNEL_ID - canal donde se envía el recordatorio
+ *   MIEMBROS_ROLE_ID        - rol a mencionar
+ */
+export const initShadowTowerReminder = (client) => {
+  const botVars = getBotVariables();
+  const channelId = botVars.SHADOW_TOWER_CHANNEL_ID;
+  const roleId = botVars.MIEMBROS_ROLE_ID;
+
+  if (!channelId || !roleId) {
+    console.warn('⚠️ Shadow Tower reminder no configurado (falta SHADOW_TOWER_CHANNEL_ID o MIEMBROS_ROLE_ID)');
+    return;
+  }
+
+  console.log('⏰ Iniciando Shadow Tower daily reminder (21:20)...');
+
+  // 21:20 todos los días, hora Madrid
+  cron.schedule('20 21 * * *', async () => {
+    try {
+      const channel = await client.channels.fetch(channelId);
+      if (channel) {
+        await channel.send({
+          content: `⏰ <@&${roleId}> **Shadow Tower** empieza en 10 minutos (21:30).`
+        });
+        console.log('⏰ Recordatorio de Shadow Tower enviado');
+      }
+    } catch (err) {
+      console.error('❌ Error enviando recordatorio de Shadow Tower:', err);
+    }
+  }, { timezone: 'Europe/Madrid' });
+
+  console.log('✅ Shadow Tower reminder programado');
+};

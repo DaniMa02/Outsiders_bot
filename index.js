@@ -31,7 +31,8 @@ import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
 import { loadOpenEventsCache } from './utils/eventCache.js';
 
 // ==================== SCHEDULER ====================
-import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
+import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler, initShadowTowerReminder } from './scheduler/eventLifecycleScheduler.js';
+import { loadScheduledReminders } from './utils/eventReminders.js';
 
 
 dotenv.config();
@@ -207,7 +208,9 @@ client.once(Events.ClientReady, async () => {
   // ==================== EVENTS SCHEDULER ====================
   initEventLifecycleScheduler(client);
   initEmbedCleanupScheduler(client);
+  initShadowTowerReminder(client);
   await checkAndFixEventStatesOnStartup(client);
+  await loadScheduledReminders(client);
 });
 
 

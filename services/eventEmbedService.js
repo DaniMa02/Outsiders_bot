@@ -338,6 +338,15 @@ function buildEventButtons(event, config) {
     rows.push(manualRow);
   }
 
+  // Cancelar evento (solo usable por el creador, validado en el handler)
+  const cancelRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('event_cancel')
+      .setLabel('❌ Cancelar evento')
+      .setStyle(ButtonStyle.Danger)
+  );
+  rows.push(cancelRow);
+
   return rows;
 }
 

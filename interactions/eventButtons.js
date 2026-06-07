@@ -19,6 +19,8 @@ import { addManualParticipant, changeParticipantRole } from '../services/partici
 import { EVENT_CONFIG } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
+import { removeEventFromCache } from '../utils/eventCache.js';
+import { cancelScheduledReminder } from '../utils/eventReminders.js';
 
 /**
  * MANEJADOR DE BOTONES DE EVENTOS
@@ -97,7 +99,7 @@ export const handleEventButton = async (interaction) => {
     setImmediate(async () => {
       try {
         // 1️⃣ Obtener evento desde message_id
-        const eventButtonIds = ['event_join', 'event_absence'];
+        const eventButtonIds = ['event_join', 'event_absence', 'event_cancel'];
         const isEventButton = eventButtonIds.includes(customId) || customId.startsWith('event_role_');
         let eventData = null;
 
@@ -132,7 +134,13 @@ export const handleEventButton = async (interaction) => {
           return;
         }
 
-        // 5️⃣ Botón desconocido
+        // 5️⃣ BOTÓN CANCELAR (solo el creador del evento)
+        if (customId === 'event_cancel') {
+          await handleCancelButton(interaction, eventData, user);
+          return;
+        }
+
+        // 6️⃣ Botón desconocido
         return safeReply(interaction, '❓ Botón no reconocido');
 
       } catch (err) {
@@ -285,6 +293,87 @@ async function handleAbsenceButton(interaction, eventData, user, member) {
 
   } catch (error) {
     return safeReply(interaction, `❌ ${error.message}`);
+  }
+}
+
+/**
+ * Manejar botón CANCELAR evento.
+ * Solo el creador del evento (event.created_by === user.id) puede cancelarlo.
+ * - Marca el evento como FINISHED en la DB (reusa estado, no añade nuevos)
+ * - Borra el embed del canal
+ * - Envía un mensaje al canal con la mención al rol del tipo de evento
+ */
+async function handleCancelButton(interaction, eventData, user) {
+  try {
+    // 1️⃣ Obtener el evento completo (necesitamos created_by y message_id)
+    const res = await query(
+      'SELECT * FROM events WHERE id = $1',
+      [eventData.id]
+    );
+
+    if (res.rowCount === 0) {
+      return safeReply(interaction, '❌ Evento no encontrado.');
+    }
+
+    const fullEvent = res.rows[0];
+
+    // 2️⃣ Verificar que el usuario es el creador
+    if (fullEvent.created_by !== user.id) {
+      return safeReply(interaction, '❌ Solo el creador del evento puede cancelarlo.');
+    }
+
+    // 3️⃣ Marcar como FINISHED en DB y limpiar caché
+    await query(
+      'UPDATE events SET status = $1, updated_at = NOW() WHERE id = $2',
+      ['FINISHED', eventData.id]
+    );
+    removeEventFromCache(eventData.id);
+
+    // 3.5️⃣ Cancelar el recordatorio programado (si existe)
+    cancelScheduledReminder(eventData.id);
+    await query(
+      'UPDATE event_reminders SET sent = TRUE, sent_at = NOW() WHERE event_id = $1 AND sent = FALSE',
+      [eventData.id]
+    );
+
+    // 4️⃣ Borrar el embed del canal
+    if (fullEvent.message_id && fullEvent.channel_id) {
+      try {
+        const channel = await interaction.client.channels.fetch(fullEvent.channel_id);
+        if (channel) {
+          const message = await channel.messages.fetch(fullEvent.message_id);
+          await message.delete();
+        }
+      } catch (err) {
+        console.warn(`⚠️ No se pudo eliminar embed del evento cancelado ${eventData.id}:`, err.message);
+      }
+    }
+
+    // 5️⃣ Enviar mensaje de cancelación al canal con mención al rol del tipo
+    const config = EVENT_CONFIG[fullEvent.type];
+    const botVars = getBotVariables();
+    const roleId = config?.notify_role_var ? botVars[config.notify_role_var] : null;
+
+    const cancelContent = roleId
+      ? `❌ **Evento cancelado: ${config?.icon || '•'} ${fullEvent.title}**\n<@&${roleId}>`
+      : `❌ **Evento cancelado: ${config?.icon || '•'} ${fullEvent.title}**`;
+
+    try {
+      const channel = await interaction.client.channels.fetch(fullEvent.channel_id);
+      if (channel) {
+        await channel.send({ content: cancelContent });
+      }
+    } catch (err) {
+      console.warn(`⚠️ No se pudo enviar mensaje de cancelación:`, err.message);
+    }
+
+    console.log(`❌ Evento ${eventData.id} cancelado por ${user.tag}`);
+
+    return safeReply(interaction, `✅ Evento **${fullEvent.title}** cancelado. Se ha notificado al canal.`);
+
+  } catch (err) {
+    console.error('❌ Error en handleCancelButton:', err);
+    return safeReply(interaction, `❌ ${err.message}`);
   }
 }
 

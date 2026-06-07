@@ -117,7 +117,8 @@ export const createEvent = {
       title: titulo,
       datetime: datetime.toISOString(),
       channelId: channelId,
-      createdBy: interaction.user.id
+      createdBy: interaction.user.id,
+      client: interaction.client
     });
 
     // 🔹 Generar y enviar embed

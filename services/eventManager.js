@@ -9,6 +9,7 @@ import {
 } from '../db/eventRepository.js';
 import { EVENT_CONFIG, EVENT_STATES, EMBED_DELETE_DELAY_MS, isValidEventType } from '../config/eventConfig.js';
 import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
+import { REMINDER_OFFSET_MS, scheduleEventReminder } from '../utils/eventReminders.js';
 
 /**
  * GESTOR DE EVENTOS
@@ -25,9 +26,10 @@ import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
 /**
  * Crear evento
  * @param {object} params
+ * @param {object} [params.client] - Cliente Discord (necesario para programar recordatorio)
  * @returns {object} evento creado
  */
-export async function createEvent({ type, title, datetime, channelId, createdBy }) {
+export async function createEvent({ type, title, datetime, channelId, createdBy, client = null }) {
   // 1️⃣ Validar tipo de evento
   if (!isValidEventType(type)) {
     throw new Error(`❌ Tipo de evento no válido: ${type}. Disponibles: ${Object.keys(EVENT_CONFIG).join(', ')}`);
@@ -60,6 +62,21 @@ export async function createEvent({ type, title, datetime, channelId, createdBy 
 
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
   addEventToCache({ ...event, status: 'OPEN' });
+
+  // 7️⃣ Programar recordatorio (10 min antes)
+  try {
+    const reminderTime = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
+    await query(
+      'INSERT INTO event_reminders (event_id, send_at) VALUES ($1, $2)',
+      [event.id, reminderTime.toISOString()]
+    );
+
+    if (client) {
+      scheduleEventReminder(client, event.id, reminderTime);
+    }
+  } catch (err) {
+    console.error('⚠️ No se pudo programar recordatorio (no crítico):', err.message);
+  }
 
   console.log(`✅ Evento creado: ${event.id} - ${type} "${title}" - ${eventDate.toLocaleString()}`);
 
