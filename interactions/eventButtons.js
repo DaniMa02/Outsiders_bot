@@ -4,7 +4,9 @@ import {
   TextInputBuilder,
   TextInputStyle,
   StringSelectMenuBuilder,
-  ActionRowBuilder
+  ActionRowBuilder,
+  ButtonBuilder,
+  ButtonStyle
 } from 'discord.js';
 import { query } from '../db/database.js';
 import { getUserCapabilities } from '../db/eventRepository.js';
@@ -16,6 +18,7 @@ import { getBotVariables } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole } from '../services/participantManager.js';
 import { EVENT_CONFIG } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
+import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
 
 /**
  * MANEJADOR DE BOTONES DE EVENTOS
@@ -313,11 +316,12 @@ function truncateForModal(text, max = 40) {
 
 /**
  * Manejar botón "Añadir manual"
+ * Abre un modal con solo el nombre. El rol (si aplica) se selecciona
+ * en un segundo paso mediante un select menu efímero, ya que Discord
+ * no permite StringSelectMenu dentro de modales.
  */
 async function handleManualAddButton(interaction, eventData) {
   try {
-    const config = EVENT_CONFIG[eventData.type];
-
     const modal = new ModalBuilder()
       .setCustomId(`event_modal_add:${eventData.id}`)
       .setTitle(`Añadir a ${truncateForModal(eventData.title)}`);
@@ -331,22 +335,6 @@ async function handleManualAddButton(interaction, eventData) {
       .setMaxLength(50);
 
     modal.addComponents(new ActionRowBuilder().addComponents(nameInput));
-
-    // Si el evento tiene roles, añadir select de rol
-    if (config.roles_required) {
-      const roleSelect = new StringSelectMenuBuilder()
-        .setCustomId('rol')
-        .setPlaceholder('Selecciona el rol')
-        .setRequired(true)
-        .addOptions(
-          Object.keys(config.max_roles).map(roleKey => ({
-            label: `${ROLE_EMOJIS[roleKey] || '•'} ${ROLE_NAMES[roleKey] || roleKey}`,
-            value: roleKey
-          }))
-        );
-
-      modal.addComponents(new ActionRowBuilder().addComponents(roleSelect));
-    }
 
     await interaction.showModal(modal);
 
@@ -362,6 +350,10 @@ async function handleManualAddButton(interaction, eventData) {
 
 /**
  * Manejar botón "Mover rol"
+ * Muestra un mensaje efímero con 2 selects (participante + nuevo rol)
+ * y un botón Confirmar. No se puede hacer en un modal porque los
+ * StringSelectMenu no están permitidos dentro de modales en la API
+ * actual de Discord.
  */
 async function handleManualMoveButton(interaction, eventData) {
   try {
@@ -391,12 +383,8 @@ async function handleManualMoveButton(interaction, eventData) {
       return await interaction.reply({ content: '❌ Demasiados participantes (>25), no se puede mostrar el selector.', ephemeral: true });
     }
 
-    const modal = new ModalBuilder()
-      .setCustomId(`event_modal_move:${eventData.id}`)
-      .setTitle(`Mover rol: ${truncateForModal(eventData.title, 28)}`);
-
     const participantSelect = new StringSelectMenuBuilder()
-      .setCustomId('participante')
+      .setCustomId(`event_move_select_participant:${eventData.id}`)
       .setPlaceholder('Selecciona participante')
       .setRequired(true)
       .addOptions(
@@ -407,10 +395,8 @@ async function handleManualMoveButton(interaction, eventData) {
         }))
       );
 
-    modal.addComponents(new ActionRowBuilder().addComponents(participantSelect));
-
     const roleSelect = new StringSelectMenuBuilder()
-      .setCustomId('nuevo_rol')
+      .setCustomId(`event_move_select_role:${eventData.id}`)
       .setPlaceholder('Nuevo rol')
       .setRequired(true)
       .addOptions(
@@ -420,9 +406,20 @@ async function handleManualMoveButton(interaction, eventData) {
         }))
       );
 
-    modal.addComponents(new ActionRowBuilder().addComponents(roleSelect));
+    const confirmButton = new ButtonBuilder()
+      .setCustomId(`event_move_confirm:${eventData.id}`)
+      .setLabel('✅ Confirmar')
+      .setStyle(ButtonStyle.Success);
 
-    await interaction.showModal(modal);
+    const row1 = new ActionRowBuilder().addComponents(participantSelect);
+    const row2 = new ActionRowBuilder().addComponents(roleSelect);
+    const row3 = new ActionRowBuilder().addComponents(confirmButton);
+
+    await interaction.reply({
+      content: `✏️ **Mover rol** en **${eventData.title}**\nSelecciona el participante y el nuevo rol, luego pulsa Confirmar.`,
+      components: [row1, row2, row3],
+      ephemeral: true
+    });
 
   } catch (err) {
     console.error('❌ Error en handleManualMoveButton:', err);
@@ -477,48 +474,53 @@ export const handleEventModalSubmit = async (interaction) => {
 };
 
 async function handleAddModalSubmit(interaction, eventId) {
-  // Defer para tener tiempo (DB + embed update)
   await interaction.deferReply({ ephemeral: true });
 
   const name = interaction.fields.getTextInputValue('nombre').trim();
-  let role = null;
 
-  try {
-    const roleValues = interaction.fields.getStringSelectValues('rol');
-    role = roleValues[0];
-  } catch {
-    // No hay select de rol (Raid) → role queda null
+  if (!name) {
+    return await interaction.editReply({ content: '❌ El nombre no puede estar vacío.' });
   }
 
-  const participant = await addManualParticipant({ eventId, name, role });
+  // Comprobar tipo de evento
+  const event = await getEvent(eventId);
+  const config = EVENT_CONFIG[event.type];
 
-  await createOrUpdateEventEmbed(interaction.client, eventId);
+  // Si NO requiere roles (Raid), crear directamente
+  if (!config.roles_required) {
+    const participant = await addManualParticipant({ eventId, name, role: null });
+    await createOrUpdateEventEmbed(interaction.client, eventId);
 
-  const stateText = participant.state === 'ACTIVE' ? '✅ ACTIVO' : '📋 RESERVA';
-  const roleText = role ? ` como **${role.toUpperCase()}**` : '';
+    const stateText = participant.state === 'ACTIVE' ? '✅ ACTIVO' : '📋 RESERVA';
+    return await interaction.editReply({
+      content: `${stateText} **${name}** añadido al evento.`
+    });
+  }
+
+  // Si requiere roles (Hell/Hardcore): guardar pendiente y pedir rol via select efímero
+  setPendingAdd(interaction.user.id, eventId, name);
+
+  const roleSelect = new StringSelectMenuBuilder()
+    .setCustomId(`event_add_role:${eventId}`)
+    .setPlaceholder('Selecciona el rol')
+    .setRequired(true)
+    .addOptions(
+      Object.keys(config.max_roles).map(roleKey => ({
+        label: `${ROLE_EMOJIS[roleKey] || '•'} ${ROLE_NAMES[roleKey] || roleKey}`,
+        value: roleKey
+      }))
+    );
 
   return await interaction.editReply({
-    content: `${stateText} **${name}** añadido al evento${roleText}.`
+    content: `✏️ Añadir a **${event.title}** — nombre: **${name}**\nAhora selecciona el rol:`,
+    components: [new ActionRowBuilder().addComponents(roleSelect)]
   });
 }
 
 async function handleMoveModalSubmit(interaction, eventId) {
-  await interaction.deferReply({ ephemeral: true });
-
-  const participantId = parseInt(interaction.fields.getStringSelectValues('participante')[0], 10);
-  const newRole = interaction.fields.getStringSelectValues('nuevo_rol')[0];
-
-  if (isNaN(participantId)) {
-    return await interaction.editReply({ content: '❌ Participante inválido.' });
-  }
-
-  const updated = await changeParticipantRole({ eventId, participantId, newRole });
-
-  await createOrUpdateEventEmbed(interaction.client, eventId);
-
-  return await interaction.editReply({
-    content: `✅ Participante movido a **${newRole.toUpperCase()}**.`
-  });
+  // Esta función ya no se usa (mover rol ahora usa mensaje efímero con selects),
+  // pero la dejo como fallback por si se recibe un customId viejo.
+  return await safeReplyModal(interaction, '❌ Esta acción ha cambiado. Usa el botón "✏️ Mover rol" del embed.');
 }
 
 async function safeReplyModal(interaction, content) {
@@ -531,6 +533,158 @@ async function safeReplyModal(interaction, content) {
     }
   } catch (err) {
     console.warn('⚠️ Fallo en safeReplyModal:', err.message);
+  }
+}
+
+// ==================== HANDLERS DE SELECTS / CONFIRM (FLUJO NUEVO) ====================
+
+/**
+ * Manejar selección de rol en el flujo de "Añadir manual" (2º paso).
+ * customId: event_add_role:<eventId>
+ */
+export const handleAddRoleSelect = async (interaction) => {
+  if (!interaction.customId.startsWith('event_add_role:')) return;
+
+  // Validar permisos por si acaso
+  if (!userCanManageManually(interaction.member)) {
+    return await safeReplySelect(interaction, '❌ Solo Admin y Líder de Grupo pueden usar este botón.');
+  }
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const role = interaction.values[0];
+  const pending = getPendingAdd(interaction.user.id, eventId);
+
+  if (!pending) {
+    return await safeReplySelect(interaction, '❌ La acción ha caducado (5 min). Vuelve a pulsar el botón "Añadir manual".');
+  }
+
+  try {
+    await interaction.deferUpdate();
+
+    const participant = await addManualParticipant({
+      eventId,
+      name: pending.name,
+      role
+    });
+
+    clearPendingAdd(interaction.user.id, eventId);
+
+    await createOrUpdateEventEmbed(interaction.client, eventId);
+
+    const stateText = participant.state === 'ACTIVE' ? '✅ ACTIVO' : '📋 RESERVA';
+    await interaction.editReply({
+      content: `${stateText} **${pending.name}** añadido como **${role.toUpperCase()}**.`,
+      components: []
+    });
+
+  } catch (err) {
+    console.error('❌ Error en handleAddRoleSelect:', err);
+    try {
+      await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+    } catch {}
+  }
+};
+
+/**
+ * Manejar selección de participante o rol en el flujo de "Mover rol".
+ * Solo almacena en memoria; el procesamiento ocurre al pulsar Confirmar.
+ * customId: event_move_select_participant:<eventId> | event_move_select_role:<eventId>
+ */
+export const handleMoveSelect = async (interaction) => {
+  const { customId, values } = interaction;
+
+  if (!customId.startsWith('event_move_select_')) return;
+
+  if (!userCanManageManually(interaction.member)) {
+    return await interaction.reply({ content: '❌ Sin permisos.', ephemeral: true });
+  }
+
+  const parts = customId.split(':');
+  if (parts.length !== 2) return;
+  const field = parts[0].replace('event_move_select_', ''); // 'participant' o 'role'
+  const eventId = parseInt(parts[1], 10);
+  if (isNaN(eventId)) return;
+
+  const value = values[0];
+
+  if (field === 'participant') {
+    setMoveSelection(interaction.user.id, eventId, { participantId: value });
+  } else if (field === 'role') {
+    setMoveSelection(interaction.user.id, eventId, { newRole: value });
+  }
+
+  // Acknowledge sin modificar el mensaje
+  try {
+    await interaction.deferUpdate();
+  } catch {}
+};
+
+/**
+ * Manejar botón "Confirmar" del flujo de "Mover rol".
+ * Lee los valores almacenados en memoria (selects de Discord no actualizan
+ * el mensaje, así que no podemos leerlos del message.components).
+ * customId: event_move_confirm:<eventId>
+ */
+export const handleMoveConfirm = async (interaction) => {
+  if (!interaction.customId.startsWith('event_move_confirm:')) return;
+
+  if (!userCanManageManually(interaction.member)) {
+    return await safeReplySelect(interaction, '❌ Solo Admin y Líder de Grupo pueden usar este botón.');
+  }
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const selection = getMoveSelection(interaction.user.id, eventId);
+
+  if (!selection || !selection.participantId || !selection.newRole) {
+    return await safeReplySelect(interaction, '❌ Debes seleccionar participante y nuevo rol antes de confirmar.');
+  }
+
+  const participantId = parseInt(selection.participantId, 10);
+  if (isNaN(participantId)) {
+    return await safeReplySelect(interaction, '❌ Participante inválido.');
+  }
+
+  const newRole = selection.newRole;
+
+  try {
+    await interaction.deferUpdate();
+
+    await changeParticipantRole({ eventId, participantId, newRole });
+    await createOrUpdateEventEmbed(interaction.client, eventId);
+
+    clearMoveSelection(interaction.user.id, eventId);
+
+    await interaction.editReply({
+      content: `✅ Participante movido a **${newRole.toUpperCase()}**.`,
+      components: []
+    });
+
+  } catch (err) {
+    console.error('❌ Error en handleMoveConfirm:', err);
+    try {
+      await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+    } catch {}
+  }
+};
+
+async function safeReplySelect(interaction, content) {
+  try {
+    if (interaction.deferred) {
+      return await interaction.editReply({ content, components: [] });
+    }
+    if (!interaction.replied) {
+      return await interaction.reply({ content, ephemeral: true });
+    }
+  } catch (err) {
+    console.warn('⚠️ Fallo en safeReplySelect:', err.message);
   }
 }
 

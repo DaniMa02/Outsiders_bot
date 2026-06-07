@@ -17,7 +17,7 @@ import { query } from './db/database.js';
 import https from "https";
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton, handleEventModalSubmit } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -224,7 +224,20 @@ client.on(Events.InteractionCreate, async interaction => {
     // Buttons
     else if (interaction.isButton()) {
       if (interaction.customId.startsWith('event_')) {
-        await handleEventButton(interaction);
+        if (interaction.customId.startsWith('event_move_confirm:')) {
+          await handleMoveConfirm(interaction);
+        } else {
+          await handleEventButton(interaction);
+        }
+      }
+    }
+
+    // StringSelectMenu (selects de rol en flujos manuales)
+    else if (interaction.isStringSelectMenu()) {
+      if (interaction.customId.startsWith('event_add_role:')) {
+        await handleAddRoleSelect(interaction);
+      } else if (interaction.customId.startsWith('event_move_select_')) {
+        await handleMoveSelect(interaction);
       }
     }
 
