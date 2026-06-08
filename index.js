@@ -328,3 +328,27 @@ export { loadScheduledMessages, scheduleAllMessages };
 
 // ---------------- Login ----------------
 console.log("TOKEN:", process.env.TOKEN);
+
+// ---------------- Graceful shutdown ----------------
+const shutdown = async (signal) => {
+  console.log(`🛑 Señal ${signal} recibida, cerrando conexiones limpiamente...`);
+  try {
+    if (client && client.isReady()) {
+      client.destroy();
+      console.log('✅ Cliente Discord cerrado');
+    }
+  } catch (err) {
+    console.error('❌ Error cerrando cliente Discord:', err.message);
+  }
+  try {
+    const { pool } = await import('./db/database.js');
+    await pool.end();
+    console.log('✅ Pool Postgres cerrado');
+  } catch (err) {
+    console.error('❌ Error cerrando pool Postgres:', err.message);
+  }
+  process.exit(0);
+};
+
+process.on('SIGTERM', () => shutdown('SIGTERM'));
+process.on('SIGINT', () => shutdown('SIGINT'));
