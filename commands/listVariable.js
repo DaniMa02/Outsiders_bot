@@ -57,8 +57,23 @@ export const listVariable = {
         });
       }
 
-      await interaction.editReply({ embeds: [embed] });
-      console.log(`✅ [list_variables] reply enviado en ${Date.now() - t0}ms`);
+      console.log(`🔎 [list_variables] intentando editReply con embed...`);
+      try {
+        await Promise.race([
+          interaction.editReply({ embeds: [embed] }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('editReply timeout 5s')), 5000))
+        ]);
+        console.log(`✅ [list_variables] editReply OK en ${Date.now() - t0}ms`);
+      } catch (editErr) {
+        console.error(`❌ [list_variables] editReply falló: ${editErr.message}, usando channel.send fallback`);
+        try {
+          await interaction.channel.send({ embeds: [embed] });
+          await interaction.deleteReply().catch(() => {});
+          console.log(`✅ [list_variables] fallback channel.send OK en ${Date.now() - t0}ms`);
+        } catch (sendErr) {
+          console.error(`❌ [list_variables] channel.send también falló:`, sendErr);
+        }
+      }
     } catch (err) {
       console.error(`❌ [list_variables] error post-query en ${Date.now() - t0}ms:`, err);
       try {
