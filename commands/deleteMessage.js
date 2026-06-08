@@ -13,7 +13,7 @@ export const deleteMessage = {
     ),
 
   async execute(interaction) {
-    await interaction.deferReply({ flags: 64 }); // mensaje efímero
+    await interaction.deferReply({ ephemeral: true }); // mensaje efímero
 
     const id = interaction.options.getInteger('id');
 
