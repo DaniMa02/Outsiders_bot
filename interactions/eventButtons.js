@@ -44,17 +44,12 @@ export const handleEventButton = async (interaction) => {
 
   // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
   // porque showModal debe ser la primera respuesta de la interacción
-  if (customId === 'event_manual_add' || customId === 'event_manual_move') {
+  if (['event_manual_add', 'event_manual_move', 'event_edit'].includes(customId)) {
     try {
-      // Verificar permisos antes de buscar el evento
-      if (!userCanManageManually(member)) {
-        return await interaction.reply({
-          content: '❌ Solo Admin y Líder de Grupo pueden usar este botón.',
-          ephemeral: true
-        });
-      }
+      // Para event_edit se necesita el evento completo (con created_by) para permisos
+      let eventData = null;
+      let fullEventForEdit = null;
 
-      let eventData;
       try {
         eventData = await getEventFromMessageId(message.id);
       } catch {
@@ -71,13 +66,39 @@ export const handleEventButton = async (interaction) => {
         });
       }
 
-      if (customId === 'event_manual_add') {
-        await handleManualAddButton(interaction, eventData);
+      if (customId === 'event_edit') {
+        // Necesitamos el evento completo (con created_by) para validar permisos
+        const fullRes = await query('SELECT * FROM events WHERE id = $1', [eventData.id]);
+        if (fullRes.rowCount === 0) {
+          return await interaction.reply({ content: '❌ Evento no encontrado.', ephemeral: true });
+        }
+        fullEventForEdit = fullRes.rows[0];
+
+        if (!userCanManageEvent(interaction.member, fullEventForEdit)) {
+          return await interaction.reply({
+            content: '❌ Solo Admin, Líder de Grupo o el creador pueden editar este evento.',
+            ephemeral: true
+          });
+        }
+
+        await handleEditButton(interaction, eventData);
       } else {
-        await handleManualMoveButton(interaction, eventData);
+        // Botones manuales
+        if (!userCanManageManually(member)) {
+          return await interaction.reply({
+            content: '❌ Solo Admin y Líder de Grupo pueden usar este botón.',
+            ephemeral: true
+          });
+        }
+
+        if (customId === 'event_manual_add') {
+          await handleManualAddButton(interaction, eventData);
+        } else {
+          await handleManualMoveButton(interaction, eventData);
+        }
       }
     } catch (err) {
-      console.error('❌ Error en botón manual:', err);
+      console.error('❌ Error en botón manual/edit:', err);
       try {
         if (!interaction.replied) {
           await interaction.reply({ content: '❌ Error interno', ephemeral: true });
@@ -101,7 +122,7 @@ export const handleEventButton = async (interaction) => {
     setImmediate(async () => {
       try {
         // 1️⃣ Obtener evento desde message_id
-        const eventButtonIds = ['event_join', 'event_absence', 'event_cancel', 'event_edit'];
+        const eventButtonIds = ['event_join', 'event_absence', 'event_cancel'];
         const isEventButton = eventButtonIds.includes(customId) || customId.startsWith('event_role_');
         let eventData = null;
 
@@ -136,19 +157,13 @@ export const handleEventButton = async (interaction) => {
           return;
         }
 
-        // 5️⃣ BOTÓN EDITAR (admin/lidergrupo/creador)
-        if (customId === 'event_edit') {
-          await handleEditButton(interaction, eventData);
-          return;
-        }
-
-        // 6️⃣ BOTÓN CANCELAR (solo el creador del evento)
+        // 5️⃣ BOTÓN CANCELAR (solo el creador del evento)
         if (customId === 'event_cancel') {
           await handleCancelButton(interaction, eventData, user);
           return;
         }
 
-        // 7️⃣ Botón desconocido
+        // 6️⃣ Botón desconocido
         return safeReply(interaction, '❓ Botón no reconocido');
 
       } catch (err) {
