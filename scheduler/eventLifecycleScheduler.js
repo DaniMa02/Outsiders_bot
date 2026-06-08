@@ -4,6 +4,7 @@ import { query } from '../db/database.js';
 import { getEventsToFinish } from '../db/eventRepository.js';
 import { finishEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
+import { getBotVariables } from '../utils/botVariables.js';
 
 /**
  * SCHEDULER DE CICLO DE VIDA DE EVENTOS
