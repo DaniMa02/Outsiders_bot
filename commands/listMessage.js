@@ -62,13 +62,23 @@ export const listMessage = {
         });
       }
 
-      console.log(`🔎 [list_messages] llamando editReply con embed (${embed.data.fields.length} fields)...`);
-      const editPromise = interaction.editReply({ embeds: [embed] });
-      const timeoutPromise = new Promise((_, reject) =>
-        setTimeout(() => reject(new Error('editReply colgado >5s')), 5000)
-      );
-      await Promise.race([editPromise, timeoutPromise]);
-      console.log(`✅ [list_messages] reply (embed) enviado en ${Date.now() - t0}ms`);
+      console.log(`🔎 [list_messages] intentando editReply con embed...`);
+      try {
+        await Promise.race([
+          interaction.editReply({ embeds: [embed] }),
+          new Promise((_, reject) => setTimeout(() => reject(new Error('editReply timeout 5s')), 5000))
+        ]);
+        console.log(`✅ [list_messages] editReply OK en ${Date.now() - t0}ms`);
+      } catch (editErr) {
+        console.error(`❌ [list_messages] editReply falló: ${editErr.message}, usando channel.send fallback`);
+        try {
+          await interaction.channel.send({ embeds: [embed] });
+          await interaction.deleteReply().catch(() => {});
+          console.log(`✅ [list_messages] fallback channel.send OK en ${Date.now() - t0}ms`);
+        } catch (sendErr) {
+          console.error(`❌ [list_messages] channel.send también falló:`, sendErr);
+        }
+      }
     } catch (err) {
       console.error(`❌ [list_messages] error post-query en ${Date.now() - t0}ms:`, err);
       try {
