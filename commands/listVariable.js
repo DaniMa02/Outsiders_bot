@@ -1,6 +1,30 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { query } from '../db/database.js';
 
+const safeEditReply = async (interaction, payload, label) => {
+  try {
+    await Promise.race([
+      interaction.editReply(payload),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout 5s`)), 5000))
+    ]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, err };
+  }
+};
+
+const safeChannelSend = async (channel, payload, userId, label) => {
+  try {
+    await Promise.race([
+      channel.send(payload),
+      new Promise((_, reject) => setTimeout(() => reject(new Error(`${label} timeout 5s`)), 5000))
+    ]);
+    return { ok: true };
+  } catch (err) {
+    return { ok: false, err };
+  }
+};
+
 export const listVariable = {
   data: new SlashCommandBuilder()
     .setName('list_variables')
@@ -24,14 +48,9 @@ export const listVariable = {
       console.log(`✅ [list_variables] query OK en ${Date.now() - t0}ms, ${res.rowCount} filas`);
     } catch (err) {
       console.error(`❌ [list_variables] query falló tras ${Date.now() - t0}ms:`, err);
-      try {
-        if (interaction.deferred && !interaction.replied) {
-          await interaction.editReply(`❌ Error de base de datos: ${err.message || err}`);
-        }
-      } catch (_) {
-        try {
-          await interaction.channel.send(`<@${interaction.user.id}> ❌ Error de base de datos: ${err.message || err}`);
-        } catch (__) { /* */ }
+      const e1 = await safeEditReply(interaction, { content: `❌ Error de base de datos: ${err.message || err}`, flags: 64 }, 'editReply(err)');
+      if (!e1.ok) {
+        await safeChannelSend(interaction.channel, { content: `<@${interaction.user.id}> ❌ Error de base de datos: ${err.message || err}`, flags: 64 }, interaction.user.id, 'channel.send(err)');
       }
       return;
     }
@@ -40,7 +59,11 @@ export const listVariable = {
       const variables = res.rows;
 
       if (!variables || variables.length === 0) {
-        await interaction.editReply('❌ No hay variables almacenadas actualmente.');
+        const e1 = await safeEditReply(interaction, { content: '❌ No hay variables almacenadas actualmente.', flags: 64 }, 'editReply(vacío)');
+        if (!e1.ok) {
+          await safeChannelSend(interaction.channel, { content: '❌ No hay variables almacenadas actualmente.', flags: 64 }, interaction.user.id, 'channel.send(vacío)');
+        }
+        console.log(`✅ [list_variables] reply vacío en ${Date.now() - t0}ms`);
         return;
       }
 
@@ -57,30 +80,27 @@ export const listVariable = {
         });
       }
 
-      console.log(`🔎 [list_variables] intentando editReply con embed...`);
-      try {
-        await Promise.race([
-          interaction.editReply({ embeds: [embed] }),
-          new Promise((_, reject) => setTimeout(() => reject(new Error('editReply timeout 5s')), 5000))
-        ]);
+      console.log(`🔎 [list_variables] intentando editReply...`);
+      const e1 = await safeEditReply(interaction, { embeds: [embed] }, 'editReply');
+      if (e1.ok) {
         console.log(`✅ [list_variables] editReply OK en ${Date.now() - t0}ms`);
-      } catch (editErr) {
-        console.error(`❌ [list_variables] editReply falló: ${editErr.message}, usando channel.send fallback`);
-        try {
-          await interaction.channel.send({ embeds: [embed] });
-          await interaction.deleteReply().catch(() => {});
-          console.log(`✅ [list_variables] fallback channel.send OK en ${Date.now() - t0}ms`);
-        } catch (sendErr) {
-          console.error(`❌ [list_variables] channel.send también falló:`, sendErr);
-        }
+        return;
+      }
+
+      console.error(`❌ [list_variables] editReply falló: ${e1.err.message}, fallback channel.send ephemeral`);
+      const s1 = await safeChannelSend(interaction.channel, { embeds: [embed], flags: 64 }, interaction.user.id, 'channel.send');
+      if (s1.ok) {
+        console.log(`✅ [list_variables] fallback channel.send OK en ${Date.now() - t0}ms`);
+        await interaction.deleteReply().catch(() => {});
+      } else {
+        console.error(`❌ [list_variables] channel.send también falló: ${s1.err.message}`);
       }
     } catch (err) {
       console.error(`❌ [list_variables] error post-query en ${Date.now() - t0}ms:`, err);
-      try {
-        if (interaction.deferred && !interaction.replied) {
-          await interaction.editReply('❌ Error formateando la respuesta.');
-        }
-      } catch (_) { /* */ }
+      const e1 = await safeEditReply(interaction, { content: '❌ Error formateando la respuesta.', flags: 64 }, 'editReply(err post)');
+      if (!e1.ok) {
+        await safeChannelSend(interaction.channel, { content: '❌ Error formateando la respuesta.', flags: 64 }, interaction.user.id, 'channel.send(err post)');
+      }
     }
   },
 };
