@@ -101,7 +101,7 @@ export const handleEventButton = async (interaction) => {
     setImmediate(async () => {
       try {
         // 1️⃣ Obtener evento desde message_id
-        const eventButtonIds = ['event_join', 'event_absence', 'event_cancel'];
+        const eventButtonIds = ['event_join', 'event_absence', 'event_cancel', 'event_edit'];
         const isEventButton = eventButtonIds.includes(customId) || customId.startsWith('event_role_');
         let eventData = null;
 
