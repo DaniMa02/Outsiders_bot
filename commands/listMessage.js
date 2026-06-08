@@ -41,6 +41,7 @@ export const listMessage = {
 
       if (!messages || messages.length === 0) {
         await interaction.editReply('📭 No hay mensajes programados actualmente.');
+        console.log(`✅ [list_messages] reply (vacío) enviado en ${Date.now() - t0}ms`);
         return;
       }
 
@@ -61,8 +62,13 @@ export const listMessage = {
         });
       }
 
-      await interaction.editReply({ embeds: [embed] });
-      console.log(`✅ [list_messages] reply enviado en ${Date.now() - t0}ms`);
+      console.log(`🔎 [list_messages] llamando editReply con embed (${embed.data.fields.length} fields)...`);
+      const editPromise = interaction.editReply({ embeds: [embed] });
+      const timeoutPromise = new Promise((_, reject) =>
+        setTimeout(() => reject(new Error('editReply colgado >5s')), 5000)
+      );
+      await Promise.race([editPromise, timeoutPromise]);
+      console.log(`✅ [list_messages] reply (embed) enviado en ${Date.now() - t0}ms`);
     } catch (err) {
       console.error(`❌ [list_messages] error post-query en ${Date.now() - t0}ms:`, err);
       try {
