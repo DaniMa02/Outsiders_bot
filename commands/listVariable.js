@@ -7,14 +7,41 @@ export const listVariable = {
     .setDescription('📋 Muestra todas las variables almacenadas del bot.'),
 
   async execute(interaction) {
-    await interaction.deferReply({ flags: 64 });
+    const t0 = Date.now();
+    console.log(`🔎 [list_variables] inicio por ${interaction.user.tag}`);
 
     try {
-      const res = await query('SELECT * FROM bot_variables ORDER BY key ASC', [], 8000);
+      await interaction.deferReply({ flags: 64 });
+    } catch (err) {
+      console.error('❌ [list_variables] deferReply falló:', err);
+      return;
+    }
+
+    let res;
+    try {
+      console.log('🔎 [list_variables] ejecutando query...');
+      res = await query('SELECT * FROM bot_variables ORDER BY key ASC', [], 5000);
+      console.log(`✅ [list_variables] query OK en ${Date.now() - t0}ms, ${res.rowCount} filas`);
+    } catch (err) {
+      console.error(`❌ [list_variables] query falló tras ${Date.now() - t0}ms:`, err);
+      try {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply(`❌ Error de base de datos: ${err.message || err}`);
+        }
+      } catch (_) {
+        try {
+          await interaction.channel.send(`<@${interaction.user.id}> ❌ Error de base de datos: ${err.message || err}`);
+        } catch (__) { /* */ }
+      }
+      return;
+    }
+
+    try {
       const variables = res.rows;
 
       if (!variables || variables.length === 0) {
-        return interaction.editReply('❌ No hay variables almacenadas actualmente.');
+        await interaction.editReply('❌ No hay variables almacenadas actualmente.');
+        return;
       }
 
       const embed = new EmbedBuilder()
@@ -31,15 +58,14 @@ export const listVariable = {
       }
 
       await interaction.editReply({ embeds: [embed] });
+      console.log(`✅ [list_variables] reply enviado en ${Date.now() - t0}ms`);
     } catch (err) {
-      console.error('❌ Error list_variables:', err);
+      console.error(`❌ [list_variables] error post-query en ${Date.now() - t0}ms:`, err);
       try {
         if (interaction.deferred && !interaction.replied) {
-          await interaction.editReply(`❌ Error al obtener las variables del bot: ${err.message || err}`);
+          await interaction.editReply('❌ Error formateando la respuesta.');
         }
-      } catch (innerErr) {
-        console.error('❌ No se pudo responder:', innerErr);
-      }
+      } catch (_) { /* */ }
     }
   },
 };

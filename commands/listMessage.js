@@ -7,14 +7,41 @@ export const listMessage = {
     .setDescription('📜 Muestra todos los mensajes programados.'),
 
   async execute(interaction) {
-    await interaction.deferReply({ flags: 64 });
+    const t0 = Date.now();
+    console.log(`🔎 [list_messages] inicio por ${interaction.user.tag}`);
 
     try {
-      const res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC', [], 8000);
+      await interaction.deferReply({ flags: 64 });
+    } catch (err) {
+      console.error('❌ [list_messages] deferReply falló:', err);
+      return;
+    }
+
+    let res;
+    try {
+      console.log('🔎 [list_messages] ejecutando query...');
+      res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC', [], 5000);
+      console.log(`✅ [list_messages] query OK en ${Date.now() - t0}ms, ${res.rowCount} filas`);
+    } catch (err) {
+      console.error(`❌ [list_messages] query falló tras ${Date.now() - t0}ms:`, err);
+      try {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply(`❌ Error de base de datos: ${err.message || err}`);
+        }
+      } catch (_) {
+        try {
+          await interaction.channel.send(`<@${interaction.user.id}> ❌ Error de base de datos: ${err.message || err}`);
+        } catch (__) { /* */ }
+      }
+      return;
+    }
+
+    try {
       const messages = res.rows;
 
       if (!messages || messages.length === 0) {
-        return interaction.editReply('📭 No hay mensajes programados actualmente.');
+        await interaction.editReply('📭 No hay mensajes programados actualmente.');
+        return;
       }
 
       const embed = new EmbedBuilder()
@@ -35,15 +62,14 @@ export const listMessage = {
       }
 
       await interaction.editReply({ embeds: [embed] });
+      console.log(`✅ [list_messages] reply enviado en ${Date.now() - t0}ms`);
     } catch (err) {
-      console.error('❌ Error list_messages:', err);
+      console.error(`❌ [list_messages] error post-query en ${Date.now() - t0}ms:`, err);
       try {
         if (interaction.deferred && !interaction.replied) {
-          await interaction.editReply(`❌ Error al obtener los mensajes programados: ${err.message || err}`);
+          await interaction.editReply('❌ Error formateando la respuesta.');
         }
-      } catch (innerErr) {
-        console.error('❌ No se pudo responder:', innerErr);
-      }
+      } catch (_) { /* */ }
     }
   },
 };
