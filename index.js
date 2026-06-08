@@ -17,7 +17,7 @@ import { query } from './db/database.js';
 import https from "https";
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -254,9 +254,11 @@ client.on(Events.InteractionCreate, async interaction => {
       }
     }
 
-    // Modal submits (gestión manual de eventos)
+    // Modal submits (gestión manual + editar evento)
     else if (interaction.isModalSubmit()) {
-      if (interaction.customId.startsWith('event_modal_')) {
+      if (interaction.customId.startsWith('event_modal_edit:')) {
+        await handleEditModalSubmit(interaction);
+      } else if (interaction.customId.startsWith('event_modal_')) {
         await handleEventModalSubmit(interaction);
       }
     }

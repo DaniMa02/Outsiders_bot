@@ -225,6 +225,51 @@ export async function deleteEvent(eventId, client) {
   console.log(`✅ Evento ${eventId} eliminado`);
 }
 
+/**
+ * Actualizar campos editables de un evento
+ * Solo actualiza los campos que se pasan (los undefined se ignoran)
+ * @returns evento actualizado
+ */
+export async function updateEvent({ eventId, type, title, datetime }) {
+  const fields = [];
+  const values = [];
+  let i = 1;
+
+  if (type !== undefined) {
+    fields.push(`type = $${i++}`);
+    values.push(type);
+  }
+  if (title !== undefined) {
+    fields.push(`title = $${i++}`);
+    values.push(title);
+  }
+  if (datetime !== undefined) {
+    fields.push(`datetime = $${i++}`);
+    values.push(datetime instanceof Date ? datetime.toISOString() : datetime);
+  }
+
+  if (fields.length === 0) return null;
+
+  fields.push(`updated_at = NOW()`);
+  values.push(eventId);
+
+  const res = await query(
+    `UPDATE events SET ${fields.join(', ')} WHERE id = $${i} RETURNING *`,
+    values
+  );
+
+  const updated = res.rows[0];
+
+  // Mantener caché sincronizado
+  if (type || title || datetime) {
+    addEventToCache({ ...updated, status: 'OPEN' });
+  }
+
+  console.log(`✏️ Evento ${eventId} actualizado: ${fields.slice(0, -1).join(', ')}`);
+
+  return updated;
+}
+
 // ==================== GUARDAR MESSAGE_ID ====================
 
 /**

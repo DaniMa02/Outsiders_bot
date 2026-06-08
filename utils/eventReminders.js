@@ -87,6 +87,45 @@ export const cancelScheduledReminder = (eventId) => {
 };
 
 /**
+ * Reprogramar el recordatorio de un evento (usado al editar fecha/hora)
+ * Cancela el timeout actual, actualiza la fila en DB y crea un nuevo timeout
+ */
+export const rescheduleReminder = async (client, eventId, newDatetime) => {
+  // Cancelar timeout en memoria
+  cancelScheduledReminder(eventId);
+
+  // Calcular nuevo send_at
+  const newSendAt = new Date(newDatetime.getTime() - REMINDER_OFFSET_MS);
+
+  // Verificar si existe fila en DB
+  const existing = await query(
+    'SELECT id FROM event_reminders WHERE event_id = $1',
+    [eventId]
+  );
+
+  if (existing.rowCount > 0) {
+    // Actualizar la fila existente, resetear sent
+    await query(
+      `UPDATE event_reminders
+       SET send_at = $1, sent = FALSE, sent_at = NULL
+       WHERE event_id = $2`,
+      [newSendAt.toISOString(), eventId]
+    );
+  } else {
+    // Crear nueva fila
+    await query(
+      'INSERT INTO event_reminders (event_id, send_at) VALUES ($1, $2)',
+      [eventId, newSendAt.toISOString()]
+    );
+  }
+
+  // Programar el nuevo timeout
+  scheduleEventReminder(client, eventId, newSendAt);
+
+  console.log(`⏰ Recordatorio reprogramado para evento ${eventId} → ${newSendAt.toISOString()}`);
+};
+
+/**
  * Al arrancar el bot: cargar todos los recordatorios pendientes y
  * reprogramar los timeouts
  */

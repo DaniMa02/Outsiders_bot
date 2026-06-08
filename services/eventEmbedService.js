@@ -405,14 +405,18 @@ function buildEventButtons(event, config) {
     rows.push(manualRow);
   }
 
-  // Cancelar evento (solo usable por el creador, validado en el handler)
-  const cancelRow = new ActionRowBuilder().addComponents(
+  // Editar y cancelar (admin/lidergrupo/creador, validado en el handler)
+  const editCancelRow = new ActionRowBuilder().addComponents(
+    new ButtonBuilder()
+      .setCustomId('event_edit')
+      .setLabel('✏️ Editar')
+      .setStyle(ButtonStyle.Secondary),
     new ButtonBuilder()
       .setCustomId('event_cancel')
-      .setLabel('❌ Cancelar evento')
+      .setLabel('❌ Cancelar')
       .setStyle(ButtonStyle.Danger)
   );
-  rows.push(cancelRow);
+  rows.push(editCancelRow);
 
   return rows;
 }

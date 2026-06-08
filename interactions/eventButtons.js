@@ -16,11 +16,13 @@ import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getEvent } from '../services/eventManager.js';
 import { getBotVariables } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole } from '../services/participantManager.js';
-import { EVENT_CONFIG } from '../config/eventConfig.js';
+import { EVENT_CONFIG, isValidEventType, getEventConfig } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
 import { removeEventFromCache } from '../utils/eventCache.js';
-import { cancelScheduledReminder } from '../utils/eventReminders.js';
+import { cancelScheduledReminder, rescheduleReminder } from '../utils/eventReminders.js';
+import { parseDateTimeSpain, formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
+import { updateEvent } from '../services/eventManager.js';
 
 /**
  * MANEJADOR DE BOTONES DE EVENTOS
@@ -134,13 +136,19 @@ export const handleEventButton = async (interaction) => {
           return;
         }
 
-        // 5️⃣ BOTÓN CANCELAR (solo el creador del evento)
+        // 5️⃣ BOTÓN EDITAR (admin/lidergrupo/creador)
+        if (customId === 'event_edit') {
+          await handleEditButton(interaction, eventData);
+          return;
+        }
+
+        // 6️⃣ BOTÓN CANCELAR (solo el creador del evento)
         if (customId === 'event_cancel') {
           await handleCancelButton(interaction, eventData, user);
           return;
         }
 
-        // 6️⃣ Botón desconocido
+        // 7️⃣ Botón desconocido
         return safeReply(interaction, '❓ Botón no reconocido');
 
       } catch (err) {
@@ -396,6 +404,21 @@ function userCanManageManually(member) {
 }
 
 /**
+ * Comprobar si el miembro puede editar/cancelar un evento:
+ * admin, lidergrupo, o el creador del evento
+ */
+function userCanManageEvent(member, event) {
+  const botVars = getBotVariables();
+  const adminRoleId = botVars.ROLE_ADMIN;
+  const liderGrupoRoleId = botVars.ROLE_LIDER_GRUPO;
+
+  if (adminRoleId && member.roles.cache.has(adminRoleId)) return true;
+  if (liderGrupoRoleId && member.roles.cache.has(liderGrupoRoleId)) return true;
+  if (event.created_by && event.created_by === member.user.id) return true;
+  return false;
+}
+
+/**
  * Truncar texto para el título de un modal (max 45 chars)
  */
 function truncateForModal(text, max = 40) {
@@ -622,6 +645,159 @@ async function safeReplyModal(interaction, content) {
     console.warn('⚠️ Fallo en safeReplyModal:', err.message);
   }
 }
+
+// ==================== HANDLERS: EDITAR EVENTO ====================
+
+/**
+ * Botón "Editar evento" — abre modal con los datos actuales como placeholders.
+ * Solo se muestra el modal; el procesamiento ocurre en handleEditModalSubmit.
+ */
+async function handleEditButton(interaction, eventData) {
+  try {
+    // Necesitamos el evento completo (con created_by) para validar permisos
+    const fullEvent = await query(
+      'SELECT * FROM events WHERE id = $1',
+      [eventData.id]
+    );
+
+    if (fullEvent.rowCount === 0) {
+      return safeReply(interaction, '❌ Evento no encontrado.');
+    }
+
+    const event = fullEvent.rows[0];
+
+    if (!userCanManageEvent(interaction.member, event)) {
+      return safeReply(interaction, '❌ Solo Admin, Líder de Grupo o el creador pueden editar este evento.');
+    }
+
+    const fechaActual = formatFechaMadrid(event.datetime);
+    const horaActual = formatHoraMadrid(event.datetime);
+
+    const modal = new ModalBuilder()
+      .setCustomId(`event_modal_edit:${eventData.id}`)
+      .setTitle(`Editar: ${truncateForModal(event.title, 30)}`);
+
+    // El tipo NO se incluye porque Discord no permite selects en modales
+    // y normalmente el tipo de evento no se cambia. Si fuera necesario,
+    // habría que borrar el evento y crearlo de nuevo.
+    modal.addComponents(
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('title')
+          .setLabel('Título (vacío = no cambiar)')
+          .setPlaceholder(`Actual: ${event.title}`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMinLength(3)
+          .setMaxLength(100)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('fecha')
+          .setLabel('Fecha DD/MM (vacío = no cambiar)')
+          .setPlaceholder(`Actual: ${fechaActual}`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(5)
+      ),
+      new ActionRowBuilder().addComponents(
+        new TextInputBuilder()
+          .setCustomId('hora')
+          .setLabel('Hora HH:MM (vacío = no cambiar)')
+          .setPlaceholder(`Actual: ${horaActual}`)
+          .setStyle(TextInputStyle.Short)
+          .setRequired(false)
+          .setMaxLength(5)
+      )
+    );
+
+    await interaction.showModal(modal);
+
+  } catch (err) {
+    console.error('❌ Error en handleEditButton:', err);
+    try {
+      if (!interaction.replied) {
+        await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      }
+    } catch {}
+  }
+}
+
+/**
+ * Submit del modal de edición.
+ * customId: event_modal_edit:<eventId>
+ */
+export const handleEditModalSubmit = async (interaction) => {
+  if (!interaction.customId.startsWith('event_modal_edit:')) return;
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) {
+    return await safeReplyModal(interaction, '❌ ID de evento inválido.');
+  }
+
+  await interaction.deferReply({ ephemeral: true });
+
+  try {
+    // Leer campos (vacío = no cambiar)
+    const newTitle = interaction.fields.getTextInputValue('title').trim();
+    const newFecha = interaction.fields.getTextInputValue('fecha').trim();
+    const newHora = interaction.fields.getTextInputValue('hora').trim();
+
+    const newTitleOrUndef = newTitle || undefined;
+
+    // Validar fecha/hora si se proporcionó alguna
+    let newDatetime;
+    if (newFecha || newHora) {
+      // Si solo una de las dos, completamos con la actual
+      let fechaStr = newFecha;
+      let horaStr = newHora;
+
+      if (!fechaStr || !horaStr) {
+        const current = await getEvent(eventId);
+        if (!fechaStr) fechaStr = formatFechaMadrid(current.datetime);
+        if (!horaStr) horaStr = formatHoraMadrid(current.datetime);
+      }
+
+      const { datetime, error } = parseDateTimeSpain(fechaStr, horaStr);
+      if (error) {
+        return await interaction.editReply({ content: `❌ ${error}` });
+      }
+      if (datetime <= new Date()) {
+        return await interaction.editReply({ content: '❌ La nueva fecha/hora está en el pasado.' });
+      }
+      newDatetime = datetime;
+    }
+
+    // Re-validar permisos (por si el modal se quedó abierto y cambiaron roles)
+    const event = await getEvent(eventId);
+    if (!userCanManageEvent(interaction.member, event)) {
+      return await interaction.editReply({ content: '❌ Sin permisos para editar este evento.' });
+    }
+
+    // Actualizar
+    const updated = await updateEvent({
+      eventId,
+      title: newTitleOrUndef,
+      datetime: newDatetime
+    });
+
+    // Si cambió fecha/hora, reprogramar recordatorio
+    if (newDatetime) {
+      await rescheduleReminder(interaction.client, eventId, newDatetime);
+    }
+
+    // Actualizar embed
+    await createOrUpdateEventEmbed(interaction.client, eventId);
+
+    return await interaction.editReply({
+      content: `✅ Evento actualizado: **${updated.title}** (${updated.type.toUpperCase()})`
+    });
+
+  } catch (err) {
+    console.error('❌ Error en handleEditModalSubmit:', err);
+    return await interaction.editReply({ content: `❌ ${err.message}` });
+  }
+};
 
 // ==================== HANDLERS DE SELECTS / CONFIRM (FLUJO NUEVO) ====================
 
