@@ -265,8 +265,19 @@ client.on(Events.InteractionCreate, async interaction => {
 
   } catch (err) {
     console.error('❌ Error en interacción:', err);
-    if (!interaction.replied) {
-      await interaction.reply({ content: '❌ Error interno', ephemeral: true });
+    try {
+      if (!interaction.replied && !interaction.deferred) {
+        await interaction.reply({ content: '❌ Error interno', ephemeral: true });
+      } else if (interaction.deferred && !interaction.replied) {
+        const expired = err?.code === 50027 || err?.message?.includes('Invalid Webhook Token');
+        await interaction.editReply({
+          content: expired
+            ? '❌ La interacción expiró. Vuelve a intentarlo.'
+            : '❌ Error interno'
+        });
+      }
+    } catch (innerErr) {
+      console.error('❌ No se pudo responder al usuario:', innerErr);
     }
   }
 });

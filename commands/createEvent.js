@@ -133,9 +133,33 @@ export const createEvent = {
     } catch (err) {
       console.error('❌ Error en comando create_event:', err);
 
-      return await interaction.editReply({
-        content: `❌ Error: ${err.message}`
-      });
+      const expired = err?.code === 50027 || err?.message?.includes('Invalid Webhook Token');
+      const replied = interaction.replied || interaction.deferred;
+
+      try {
+        if (!replied) {
+          return await interaction.reply({
+            content: expired
+              ? '❌ La interacción expiró antes de poder procesarla. Vuelve a intentarlo.'
+              : `❌ Error: ${err.message}`,
+            ephemeral: true
+          });
+        }
+        return await interaction.editReply({
+          content: expired
+            ? '❌ La interacción expiró antes de poder procesarla. Vuelve a intentarlo.'
+            : `❌ Error: ${err.message}`
+        });
+      } catch (innerErr) {
+        console.error('❌ No se pudo responder al usuario:', innerErr);
+        if (interaction.channel && typeof interaction.channel.send === 'function') {
+          try {
+            await interaction.channel.send({
+              content: `<@${interaction.user.id}> ❌ La interacción expiró. Vuelve a intentarlo.`
+            });
+          } catch (_) { /* nada más que hacer */ }
+        }
+      }
     }
   }
 };

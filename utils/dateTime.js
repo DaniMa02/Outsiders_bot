@@ -20,7 +20,8 @@ export function isMadridDST(date) {
 
 /**
  * Parsear fecha (DD/MM) y hora (HH:MM) a datetime Madrid (convertido a UTC).
- * Si la fecha ya pasó este año, se usa el año siguiente.
+ * - Si el día/mes ya pasó este año, se usa el año siguiente.
+ * - Si es HOY y la hora ya pasó, se rechaza (no se salta al año siguiente).
  *
  * @param {string} fechaStr - "DD/MM"
  * @param {string} horaStr  - "HH:MM"
@@ -59,17 +60,30 @@ export function parseDateTimeSpain(fechaStr, horaStr) {
   }
 
   const now = new Date();
-  let year = now.getFullYear();
+  const year = now.getFullYear();
 
   const tentativeUTC = new Date(Date.UTC(year, mes - 1, dia, hora, minuto, 0));
   const offsetHours = isMadridDST(tentativeUTC) ? 2 : 1;
+  const datetime = new Date(Date.UTC(year, mes - 1, dia, hora - offsetHours, minuto, 0));
 
-  let datetime = new Date(Date.UTC(year, mes - 1, dia, hora - offsetHours, minuto, 0));
+  const todayMonth = now.getUTCMonth();
+  const todayDay = now.getUTCDate();
+  const inputIsPast = (mes - 1) < todayMonth || ((mes - 1) === todayMonth && dia < todayDay);
+  const inputIsToday = (mes - 1) === todayMonth && dia === todayDay;
 
-  if (datetime <= now) {
+  if (inputIsPast) {
     const tentativeNext = new Date(Date.UTC(year + 1, mes - 1, dia, hora, minuto, 0));
     const offsetNext = isMadridDST(tentativeNext) ? 2 : 1;
-    datetime = new Date(Date.UTC(year + 1, mes - 1, dia, hora - offsetNext, minuto, 0));
+    const datetimeNext = new Date(Date.UTC(year + 1, mes - 1, dia, hora - offsetNext, minuto, 0));
+
+    if (isNaN(datetimeNext.getTime())) {
+      return { datetime: null, error: '❌ Fecha inválida' };
+    }
+    return { datetime: datetimeNext, error: null };
+  }
+
+  if (inputIsToday && datetime <= now) {
+    return { datetime: null, error: '❌ No puedes crear eventos en el pasado.' };
   }
 
   if (isNaN(datetime.getTime())) {
