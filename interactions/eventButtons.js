@@ -340,9 +340,9 @@ async function handleCancelButton(interaction, eventData, user) {
 
     const fullEvent = res.rows[0];
 
-    // 2️⃣ Verificar que el usuario es el creador
-    if (fullEvent.created_by !== user.id) {
-      return safeReply(interaction, '❌ Solo el creador del evento puede cancelarlo.');
+    // 2️⃣ Verificar permisos: admin, lidergrupo o creador
+    if (!userCanManageEvent(interaction.member, fullEvent)) {
+      return safeReply(interaction, '❌ Solo Admin, Líder de Grupo o el creador pueden cancelar este evento.');
     }
 
     // 3️⃣ Marcar como FINISHED en DB y limpiar caché
