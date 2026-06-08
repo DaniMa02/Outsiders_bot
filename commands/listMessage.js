@@ -1,68 +1,43 @@
 import { SlashCommandBuilder, EmbedBuilder } from 'discord.js';
 import { query } from '../db/database.js';
-import { getBotVariables } from '../utils/botVariables.js';
-
-const DISCORD_ID_RE = /^\d{17,20}$/;
-
-const resolveVars = (text, botVars) => {
-  if (!text) return text;
-  return text.replace(/\{\{(\w+)\}\}/g, (_, key) => {
-    const v = botVars[key];
-    if (!v) return `{{${key}}}`;
-    if (DISCORD_ID_RE.test(v)) {
-      const k = key.toLowerCase();
-      if (k.includes('channel')) return `<#${v}>`;
-      if (k.includes('role')) return `<@&${v}>`;
-      return `<@${v}>`;
-    }
-    return v;
-  });
-};
 
 export const listMessage = {
   data: new SlashCommandBuilder()
     .setName('list_messages')
-    .setDescription('Muestra todos los mensajes programados.'),
+    .setDescription('📜 Muestra todos los mensajes programados.'),
 
   async execute(interaction) {
-    await interaction.deferReply({ ephemeral: true });
+    await interaction.deferReply({ flags: 64 });
 
     try {
       const res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC');
       const messages = res.rows;
-      const botVars = getBotVariables();
 
       if (!messages || messages.length === 0) {
-        return await interaction.editReply('No hay mensajes programados actualmente.');
+        return interaction.editReply('📭 No hay mensajes programados actualmente.');
       }
 
       const embed = new EmbedBuilder()
-        .setTitle('Mensajes programados')
+        .setTitle('📅 Mensajes programados')
         .setColor('#00AEEF')
         .setDescription('Lista de mensajes actualmente almacenados en la base de datos.')
         .setTimestamp();
 
       for (const msg of messages) {
-        const resolvedChannel = resolveVars(msg.channel_id, botVars);
-        const resolvedContent = resolveVars(msg.content, botVars);
         embed.addFields({
-          name: `ID: ${msg.id}`,
+          name: `🆔 ID: ${msg.id}`,
           value:
-            `**Canal:** ${resolvedChannel}\n` +
+            `**Canal:** <#${msg.channel_id}>\n` +
             `**Hora:** ${msg.send_time}\n` +
-            `**Dias:** ${msg.days_of_week || 'Todos'}\n` +
-            `**Contenido:** ${resolvedContent.slice(0, 200)}${resolvedContent.length > 200 ? '...' : ''}`,
+            `**Días:** ${msg.days_of_week || 'Todos'}\n` +
+            `**Contenido:** ${msg.content.slice(0, 100)}${msg.content.length > 100 ? '...' : ''}`,
         });
       }
 
       await interaction.editReply({ embeds: [embed] });
     } catch (err) {
-      console.error('Error list_messages:', err);
-      try {
-        if (interaction.deferred && !interaction.replied) {
-          await interaction.editReply('Error al obtener los mensajes programados.');
-        }
-      } catch (_) { /* */ }
+      console.error('❌ Error mostrando mensajes:', err);
+      await interaction.editReply('❌ Error al obtener los mensajes programados.');
     }
   },
 };
