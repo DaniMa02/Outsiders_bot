@@ -20,6 +20,24 @@ const scheduledTimeouts = new Map(); // eventId → Timeout
 const REMINDER_OFFSET_MS = 10 * 60 * 1000; // 10 minutos
 const PAST_DUE_GRACE_MS = 60 * 60 * 1000;  // 1 hora de gracia para recordatorios atrasados
 
+// setTimeout en Node tiene un delay máximo de 2^31-1 ms (~24.8 días).
+// Para delays mayores hay que encadenar varios setTimeout.
+const MAX_SET_TIMEOUT_MS = 2_147_483_647; // ~24.8 días
+
+/**
+ * setTimeout que soporta delays arbitrariamente largos encadenando
+ * varios timeouts, cada uno <= MAX_SET_TIMEOUT_MS.
+ */
+function safeSetTimeout(callback, delay) {
+  if (delay <= MAX_SET_TIMEOUT_MS) {
+    return setTimeout(callback, delay);
+  }
+  return setTimeout(
+    () => safeSetTimeout(callback, delay - MAX_SET_TIMEOUT_MS),
+    MAX_SET_TIMEOUT_MS
+  );
+}
+
 /**
  * Programar el setTimeout en memoria para un recordatorio.
  * Si ya hay uno para el mismo evento, lo cancela antes.
@@ -46,7 +64,7 @@ export const scheduleEventReminder = (client, eventId, sendAt) => {
     return;
   }
 
-  const timeout = setTimeout(() => {
+  const timeout = safeSetTimeout(() => {
     scheduledTimeouts.delete(eventId);
     sendReminder(client, eventId).catch(err =>
       console.error(`❌ Error enviando recordatorio para evento ${eventId}:`, err)
@@ -54,7 +72,7 @@ export const scheduleEventReminder = (client, eventId, sendAt) => {
   }, delay);
 
   scheduledTimeouts.set(eventId, timeout);
-  console.log(`⏰ Recordatorio programado para evento ${eventId} en ${Math.round(delay / 1000)}s`);
+  console.log(`⏰ Recordatorio programado para evento ${eventId} en ${Math.round(delay / 1000)}s (${Math.round(delay / 86400000)} días)`);
 };
 
 /**
