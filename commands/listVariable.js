@@ -7,12 +7,14 @@ export const listVariable = {
     .setDescription('Muestra todas las variables almacenadas del bot.'),
 
   async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+
     try {
       const res = await query('SELECT * FROM bot_variables ORDER BY key ASC');
       const variables = res.rows;
 
       if (!variables || variables.length === 0) {
-        return interaction.reply({ content: 'No hay variables almacenadas actualmente.', ephemeral: true });
+        return await interaction.editReply('No hay variables almacenadas actualmente.');
       }
 
       const embed = new EmbedBuilder()
@@ -28,14 +30,12 @@ export const listVariable = {
         });
       }
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.editReply({ embeds: [embed] });
     } catch (err) {
       console.error('Error list_variables:', err);
       try {
-        if (interaction.replied || interaction.deferred) {
+        if (interaction.deferred && !interaction.replied) {
           await interaction.editReply('Error al obtener las variables del bot.');
-        } else {
-          await interaction.reply({ content: 'Error al obtener las variables del bot.', ephemeral: true });
         }
       } catch (_) { /* */ }
     }

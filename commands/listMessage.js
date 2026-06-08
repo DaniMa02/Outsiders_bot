@@ -25,13 +25,15 @@ export const listMessage = {
     .setDescription('Muestra todos los mensajes programados.'),
 
   async execute(interaction) {
+    await interaction.deferReply({ ephemeral: true });
+
     try {
       const res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC');
       const messages = res.rows;
       const botVars = getBotVariables();
 
       if (!messages || messages.length === 0) {
-        return interaction.reply({ content: 'No hay mensajes programados actualmente.', ephemeral: true });
+        return await interaction.editReply('No hay mensajes programados actualmente.');
       }
 
       const embed = new EmbedBuilder()
@@ -53,14 +55,12 @@ export const listMessage = {
         });
       }
 
-      await interaction.reply({ embeds: [embed], ephemeral: true });
+      await interaction.editReply({ embeds: [embed] });
     } catch (err) {
       console.error('Error list_messages:', err);
       try {
-        if (interaction.replied || interaction.deferred) {
+        if (interaction.deferred && !interaction.replied) {
           await interaction.editReply('Error al obtener los mensajes programados.');
-        } else {
-          await interaction.reply({ content: 'Error al obtener los mensajes programados.', ephemeral: true });
         }
       } catch (_) { /* */ }
     }
