@@ -74,6 +74,8 @@ const loadScheduledMessages = async () => {
 };
 
 // ---------------- Función genérica para enviar mensajes ----------------
+const DISCORD_ID_RE = /^\d{17,20}$/;
+
 const sendMessage = async (channelId, content, botVars) => {
   try {
     const resolvedChannelId = channelId.replace(/\{\{(\w+)\}\}/g, (_, key) => {
@@ -100,8 +102,11 @@ const sendMessage = async (channelId, content, botVars) => {
         const value = botVars[key];
         if (!value) return `{{${key}}}`;
 
-        if (key.toLowerCase().startsWith('role')) {
-          return `<@&${value}>`;
+        if (DISCORD_ID_RE.test(value)) {
+          const k = key.toLowerCase();
+          if (k.includes('channel')) return `<#${value}>`;
+          if (k.includes('role')) return `<@&${value}>`;
+          return `<@${value}>`;
         }
 
         return value;
