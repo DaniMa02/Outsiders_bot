@@ -10,7 +10,7 @@ export const listMessage = {
     await interaction.deferReply({ flags: 64 });
 
     try {
-      const res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC');
+      const res = await query('SELECT * FROM scheduled_messages ORDER BY id ASC', [], 8000);
       const messages = res.rows;
 
       if (!messages || messages.length === 0) {
@@ -36,8 +36,14 @@ export const listMessage = {
 
       await interaction.editReply({ embeds: [embed] });
     } catch (err) {
-      console.error('❌ Error mostrando mensajes:', err);
-      await interaction.editReply('❌ Error al obtener los mensajes programados.');
+      console.error('❌ Error list_messages:', err);
+      try {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply(`❌ Error al obtener los mensajes programados: ${err.message || err}`);
+        }
+      } catch (innerErr) {
+        console.error('❌ No se pudo responder:', innerErr);
+      }
     }
   },
 };

@@ -13,9 +13,20 @@ const pool = new Pool({
   }
 });
 
-// Función para ejecutar queries fácilmente
-export const query = async (text, params) => {
-  return pool.query(text, params);
+const DEFAULT_QUERY_TIMEOUT_MS = 10_000;
+
+const withTimeout = (promise, ms, label) =>
+  Promise.race([
+    promise,
+    new Promise((_, reject) =>
+      setTimeout(() => reject(new Error(`Query timeout (${ms}ms): ${label}`)), ms)
+    )
+  ]);
+
+// Función para ejecutar queries fácilmente con timeout
+export const query = async (text, params, timeoutMs = DEFAULT_QUERY_TIMEOUT_MS) => {
+  return withTimeout(pool.query(text, params), timeoutMs, text.split('\n')[0].slice(0, 60));
 };
 
 export { pool };
+

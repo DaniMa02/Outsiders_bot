@@ -10,7 +10,7 @@ export const listVariable = {
     await interaction.deferReply({ flags: 64 });
 
     try {
-      const res = await query('SELECT * FROM bot_variables ORDER BY key ASC');
+      const res = await query('SELECT * FROM bot_variables ORDER BY key ASC', [], 8000);
       const variables = res.rows;
 
       if (!variables || variables.length === 0) {
@@ -32,8 +32,14 @@ export const listVariable = {
 
       await interaction.editReply({ embeds: [embed] });
     } catch (err) {
-      console.error('❌ Error mostrando variables:', err);
-      await interaction.editReply('❌ Error al obtener las variables del bot.');
+      console.error('❌ Error list_variables:', err);
+      try {
+        if (interaction.deferred && !interaction.replied) {
+          await interaction.editReply(`❌ Error al obtener las variables del bot: ${err.message || err}`);
+        }
+      } catch (innerErr) {
+        console.error('❌ No se pudo responder:', innerErr);
+      }
     }
   },
 };
