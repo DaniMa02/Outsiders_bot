@@ -4,16 +4,20 @@
  * HELPERS PARA INTERACCIONES
  *
  * - withEphemeralAutoDelete(interaction):
- *     Envuelve una interacción para que sus mensajes efímeros se borren
- *     automáticamente después de EPHEMERAL_DELETE_DELAY_MS. Cubre los tres
- *     métodos que pueden enviar un mensaje efímero:
+ *     Parchea reply/editReply/followUp en la propia interaction para que sus
+ *     mensajes efímeros se borren automáticamente a los EPHEMERAL_DELETE_DELAY_MS.
+ *     Cubre los tres métodos que pueden enviar un mensaje efímero:
  *       - reply({ ephemeral: true })           → respuesta inicial
  *       - editReply(...) tras deferReply ephemeral → respuesta diferida
  *       - followUp({ ephemeral: true })        → mensajes adicionales
  *
- *     El resto de propiedades y métodos se delegan al objeto original vía
- *     prototype chain, por lo que es totalmente transparente para los handlers.
- *     Solo hay que envolver la interacción en el dispatcher (index.js) una vez.
+ *     Mutamos la interaction directamente (en vez de Object.create / Proxy)
+ *     porque discord.js setea `deferred`/`replied`/`ephemeral` sobre el `this`
+ *     del método original. Si envolvemos con un wrapper, el deferReply se
+ *     ejecuta con `this === wrapper` y deja el estado en el wrapper, no en la
+ *     interaction original → la siguiente editReply falla con InteractionNotReplied.
+ *     Mutando la propia interaction (que es de un solo uso) el estado siempre
+ *     está en el mismo objeto.
  */
 
 export const EPHEMERAL_DELETE_DELAY_MS = 10000; // 10 segundos
@@ -41,32 +45,37 @@ function scheduleEphemeralDeletion(message) {
 }
 
 /**
- * Envuelve una interacción para auto-borrar sus mensajes efímeros.
+ * Parchea una interacción para auto-borrar sus mensajes efímeros.
+ * Modifica la interaction in-place y la devuelve.
  * @param {import('discord.js').Interaction} interaction
- * @returns {Proxy} interacción envuelta (mismo aspecto, métodos parchados)
+ * @returns {import('discord.js').Interaction} la misma interaction, ya parchada
  */
 export function withEphemeralAutoDelete(interaction) {
-  const wrapped = Object.create(interaction);
+  // Guardamos los originales bound a la propia interaction para que `this`
+  // dentro del método de discord.js sea SIEMPRE la interaction (no el wrapper)
+  const originalReply = interaction.reply.bind(interaction);
+  const originalEditReply = interaction.editReply.bind(interaction);
+  const originalFollowUp = interaction.followUp.bind(interaction);
 
-  wrapped.reply = async (options) => {
-    const msg = await interaction.reply(options);
+  interaction.reply = async function(options) {
+    const msg = await originalReply(options);
     if (options?.ephemeral) scheduleEphemeralDeletion(msg);
     return msg;
   };
 
-  wrapped.editReply = async (options) => {
-    const msg = await interaction.editReply(options);
+  interaction.editReply = async function(options) {
+    const msg = await originalEditReply(options);
     // Si el deferReply fue con ephemeral, el editReply resultante también lo es
     // (discord.js marca interaction.ephemeral = true en ese caso)
     if (interaction.ephemeral) scheduleEphemeralDeletion(msg);
     return msg;
   };
 
-  wrapped.followUp = async (options) => {
-    const msg = await interaction.followUp(options);
+  interaction.followUp = async function(options) {
+    const msg = await originalFollowUp(options);
     if (options?.ephemeral) scheduleEphemeralDeletion(msg);
     return msg;
   };
 
-  return wrapped;
+  return interaction;
 }
