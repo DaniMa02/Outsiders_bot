@@ -57,24 +57,36 @@ export function withEphemeralAutoDelete(interaction) {
   const originalEditReply = interaction.editReply.bind(interaction);
   const originalFollowUp = interaction.followUp.bind(interaction);
 
-  interaction.reply = async function(options) {
-    const msg = await originalReply(options);
-    if (options?.ephemeral) scheduleEphemeralDeletion(msg);
-    return msg;
+  interaction.reply = async function(options = {}) {
+    // Necesitamos el Message para poder borrarlo. Si el caller no pidió
+    // explícitamente fetchReply:false y el mensaje es efímero, añadimos
+    // fetchReply:true para que discord.js nos devuelva el Message.
+    if (options.ephemeral && options.fetchReply === undefined) {
+      const msg = await originalReply({ ...options, fetchReply: true });
+      scheduleEphemeralDeletion(msg);
+      return msg;
+    }
+    return originalReply(options);
   };
 
-  interaction.editReply = async function(options) {
-    const msg = await originalEditReply(options);
-    // Si el deferReply fue con ephemeral, el editReply resultante también lo es
-    // (discord.js marca interaction.ephemeral = true en ese caso)
-    if (interaction.ephemeral) scheduleEphemeralDeletion(msg);
-    return msg;
+  interaction.editReply = async function(options = {}) {
+    // Tras un deferReply({ephemeral:true}), el editReply resultante es efímero.
+    // Discord.js marca interaction.ephemeral=true en ese caso.
+    if (interaction.ephemeral && options.fetchReply === undefined) {
+      const msg = await originalEditReply({ ...options, fetchReply: true });
+      scheduleEphemeralDeletion(msg);
+      return msg;
+    }
+    return originalEditReply(options);
   };
 
-  interaction.followUp = async function(options) {
-    const msg = await originalFollowUp(options);
-    if (options?.ephemeral) scheduleEphemeralDeletion(msg);
-    return msg;
+  interaction.followUp = async function(options = {}) {
+    if (options.ephemeral && options.fetchReply === undefined) {
+      const msg = await originalFollowUp({ ...options, fetchReply: true });
+      scheduleEphemeralDeletion(msg);
+      return msg;
+    }
+    return originalFollowUp(options);
   };
 
   return interaction;
