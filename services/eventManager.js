@@ -9,7 +9,14 @@ import {
 } from '../db/eventRepository.js';
 import { EVENT_CONFIG, EVENT_STATES, EMBED_DELETE_DELAY_MS, isValidEventType } from '../config/eventConfig.js';
 import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
-import { REMINDER_OFFSET_MS, scheduleEventReminder } from '../utils/eventReminders.js';
+import {
+  REMINDER_OFFSET_MS,
+  DM_REMINDER_OFFSET_MS,
+  scheduleEventReminder,
+  scheduleDmReminder,
+  cancelScheduledReminder,
+  deleteReminderMessage
+} from '../utils/eventReminders.js';
 
 /**
  * GESTOR DE EVENTOS
@@ -63,16 +70,19 @@ export async function createEvent({ type, title, datetime, channelId, createdBy,
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
   addEventToCache({ ...event, status: 'OPEN' });
 
-  // 7️⃣ Programar recordatorio (10 min antes)
+  // 7️⃣ Programar recordatorios: canal (10 min antes) + DM individual (15 min antes)
   try {
     const reminderTime = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
+    const dmReminderTime = new Date(eventDate.getTime() - DM_REMINDER_OFFSET_MS);
+
     await query(
-      'INSERT INTO event_reminders (event_id, send_at) VALUES ($1, $2)',
-      [event.id, reminderTime.toISOString()]
+      'INSERT INTO event_reminders (event_id, send_at, dm_send_at) VALUES ($1, $2, $3)',
+      [event.id, reminderTime.toISOString(), dmReminderTime.toISOString()]
     );
 
     if (client) {
       scheduleEventReminder(client, event.id, reminderTime);
+      scheduleDmReminder(client, event.id, dmReminderTime);
     }
   } catch (err) {
     console.error('⚠️ No se pudo programar recordatorio (no crítico):', err.message);
@@ -202,6 +212,9 @@ export async function finishEvent(eventId, client) {
 export async function deleteEvent(eventId, client) {
   const event = await getEvent(eventId);
 
+  // Cancelar el recordatorio programado (si estuviera pendiente)
+  cancelScheduledReminder(eventId);
+
   // Eliminar mensaje del canal si existe
   if (event.message_id && event.channel_id) {
     try {
@@ -215,6 +228,9 @@ export async function deleteEvent(eventId, client) {
       console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err.message);
     }
   }
+
+  // También borrar el mensaje de recordatorio si se llegó a enviar
+  await deleteReminderMessage(client, eventId);
 
   // Eliminar evento de BD (elimina participantes automáticamente por FK)
   await deleteEventDB(eventId);
@@ -285,6 +301,7 @@ export async function saveEventMessageId(eventId, messageId) {
 /**
  * Programar eliminación de embed después de X tiempo
  * (Por defecto 1 hora después de FINISHED)
+ * También elimina el mensaje de recordatorio (10 min antes) en el mismo ciclo
  */
 export function scheduleEmbedDeletion(eventId, channelId, messageId, client, delayMs = EMBED_DELETE_DELAY_MS) {
   console.log(`⏱️ Programada eliminación de embed para evento ${eventId} en ${delayMs / 1000 / 60} minutos`);
@@ -299,6 +316,14 @@ export function scheduleEmbedDeletion(eventId, channelId, messageId, client, del
       }
     } catch (err) {
       console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err.message);
+    }
+
+    // También borrar el mensaje de recordatorio (en su propio try para
+    // que un fallo no afecte al otro)
+    try {
+      await deleteReminderMessage(client, eventId);
+    } catch (err) {
+      console.warn(`⚠️ No se pudo eliminar recordatorio de evento ${eventId}:`, err.message);
     }
   }, delayMs);
 }

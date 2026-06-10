@@ -20,7 +20,7 @@ import { EVENT_CONFIG, isValidEventType, getEventConfig } from '../config/eventC
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
 import { removeEventFromCache } from '../utils/eventCache.js';
-import { cancelScheduledReminder, rescheduleReminder } from '../utils/eventReminders.js';
+import { cancelScheduledReminder, rescheduleReminder, deleteReminderMessage } from '../utils/eventReminders.js';
 import { parseDateTimeSpain, formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
 import { updateEvent } from '../services/eventManager.js';
 
@@ -352,10 +352,12 @@ async function handleCancelButton(interaction, eventData, user) {
     );
     removeEventFromCache(eventData.id);
 
-    // 3.5️⃣ Cancelar el recordatorio programado (si existe)
+    // 3.5️⃣ Cancelar los recordatorios programados (canal + DM)
     cancelScheduledReminder(eventData.id);
     await query(
-      'UPDATE event_reminders SET sent = TRUE, sent_at = NOW() WHERE event_id = $1 AND sent = FALSE',
+      `UPDATE event_reminders
+       SET sent = TRUE, sent_at = NOW(), dm_sent = TRUE, dm_sent_at = NOW()
+       WHERE event_id = $1 AND (sent = FALSE OR dm_sent = FALSE)`,
       [eventData.id]
     );
 
@@ -370,6 +372,13 @@ async function handleCancelButton(interaction, eventData, user) {
       } catch (err) {
         console.warn(`⚠️ No se pudo eliminar embed del evento cancelado ${eventData.id}:`, err.message);
       }
+    }
+
+    // 4.5️⃣ Borrar también el mensaje de recordatorio si se llegó a enviar
+    try {
+      await deleteReminderMessage(interaction.client, eventData.id);
+    } catch (err) {
+      console.warn(`⚠️ No se pudo eliminar recordatorio del evento cancelado ${eventData.id}:`, err.message);
     }
 
     // 5️⃣ Enviar mensaje de cancelación al canal con mención al rol del tipo

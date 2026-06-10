@@ -5,6 +5,7 @@ import { getEventsToFinish } from '../db/eventRepository.js';
 import { finishEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getBotVariables } from '../utils/botVariables.js';
+import { deleteReminderMessage } from '../utils/eventReminders.js';
 
 /**
  * SCHEDULER DE CICLO DE VIDA DE EVENTOS
@@ -140,10 +141,24 @@ async function cleanupOldEmbeds(client) {
         // Limpiar message_id (tanto en éxito como si el canal ya no existe)
         await query('UPDATE events SET message_id = NULL WHERE id = $1', [event.id]);
 
+        // También borrar el mensaje de recordatorio (10 min antes) si existe
+        // Lo hacemos en su propio try para que un fallo no impida limpiar el otro
+        try {
+          await deleteReminderMessage(client, event.id);
+        } catch (reminderErr) {
+          console.warn(`⚠️ Error limpiando recordatorio de evento ${event.id}:`, reminderErr.message);
+        }
+
       } catch (err) {
         // Discord code 10008: Unknown Message → ya fue borrado, limpiar referencia
         if (err.code === 10008) {
           await query('UPDATE events SET message_id = NULL WHERE id = $1', [event.id]);
+          // Aun si el embed ya no existe, intentamos limpiar el recordatorio
+          try {
+            await deleteReminderMessage(client, event.id);
+          } catch (reminderErr) {
+            // silencioso
+          }
           skipped++;
         } else {
           console.warn(`⚠️ Error limpiando embed de evento ${event.id}:`, err.message);
