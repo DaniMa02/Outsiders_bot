@@ -18,25 +18,34 @@
  *     interaction original → la siguiente editReply falla con InteractionNotReplied.
  *     Mutando la propia interaction (que es de un solo uso) el estado siempre
  *     está en el mismo objeto.
+ *
+ *     El borrado se hace vía `interaction.webhook.deleteMessage(messageId)` en
+ *     vez de `message.delete()` porque el webhook de la interacción es la
+ *     vía correcta (y siempre disponible) para borrar replies, mientras que
+ *     `message.delete()` depende de que `message.channel` resuelva bien, lo
+ *     cual no siempre es fiable para mensajes efímeros de interacción.
  */
 
 export const EPHEMERAL_DELETE_DELAY_MS = 10000; // 10 segundos
 
 /**
- * Programa el borrado de un mensaje efímero tras EPHEMERAL_DELETE_DELAY_MS.
+ * Programa el borrado de un mensaje efímero tras EPHEMERAL_DELETE_DELAY_MS
+ * usando el webhook de la interaction (más fiable que message.delete()).
  * - Si el mensaje ya no existe (10008) o la interacción expiró (50027), se ignora.
  * - El setTimeout se unref() para no bloquear el cierre del proceso.
  */
-function scheduleEphemeralDeletion(message) {
-  if (!message) return;
+function scheduleEphemeralDeletion(interaction, message) {
+  if (!message?.id) return;
+
+  const messageId = message.id;
 
   const timer = setTimeout(async () => {
     try {
-      await message.delete();
+      await interaction.webhook.deleteMessage(messageId);
     } catch (err) {
       // 10008 = Unknown Message (ya borrado), 50027 = Invalid Webhook Token (interacción expirada)
       if (err.code !== 10008 && err.code !== 50027) {
-        console.warn('⚠️ No se pudo borrar mensaje efímero:', err.message);
+        console.warn(`⚠️ No se pudo borrar mensaje efímero ${messageId}:`, err.message);
       }
     }
   }, EPHEMERAL_DELETE_DELAY_MS);
@@ -63,7 +72,7 @@ export function withEphemeralAutoDelete(interaction) {
     // fetchReply:true para que discord.js nos devuelva el Message.
     if (options.ephemeral && options.fetchReply === undefined) {
       const msg = await originalReply({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(msg);
+      scheduleEphemeralDeletion(interaction, msg);
       return msg;
     }
     return originalReply(options);
@@ -74,7 +83,7 @@ export function withEphemeralAutoDelete(interaction) {
     // Discord.js marca interaction.ephemeral=true en ese caso.
     if (interaction.ephemeral && options.fetchReply === undefined) {
       const msg = await originalEditReply({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(msg);
+      scheduleEphemeralDeletion(interaction, msg);
       return msg;
     }
     return originalEditReply(options);
@@ -83,7 +92,7 @@ export function withEphemeralAutoDelete(interaction) {
   interaction.followUp = async function(options = {}) {
     if (options.ephemeral && options.fetchReply === undefined) {
       const msg = await originalFollowUp({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(msg);
+      scheduleEphemeralDeletion(interaction, msg);
       return msg;
     }
     return originalFollowUp(options);
