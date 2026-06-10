@@ -29,6 +29,7 @@ import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
 // ==================== UTILITIES ====================
 import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
 import { loadOpenEventsCache } from './utils/eventCache.js';
+import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
 
 // ==================== SCHEDULER ====================
 import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
@@ -222,59 +223,62 @@ client.once(Events.ClientReady, async () => {
 
 // ---------------- Interactions ----------------
 client.on(Events.InteractionCreate, async interaction => {
+  // Envolver para auto-borrar mensajes efímeros a los 10s
+  const interaction$ = withEphemeralAutoDelete(interaction);
+
   try {
     // Slash commands
-    if (interaction.isChatInputCommand()) {
-      const command = commands.find(c => c.data.name === interaction.commandName);
+    if (interaction$.isChatInputCommand()) {
+      const command = commands.find(c => c.data.name === interaction$.commandName);
       if (!command) return;
-      await command.execute(interaction);
+      await command.execute(interaction$);
     }
 
     // Autocomplete (de slash commands)
-    else if (interaction.isAutocomplete()) {
-      const command = commands.find(c => c.data.name === interaction.commandName);
+    else if (interaction$.isAutocomplete()) {
+      const command = commands.find(c => c.data.name === interaction$.commandName);
       if (command?.autocomplete) {
-        await command.autocomplete(interaction);
+        await command.autocomplete(interaction$);
       }
     }
 
     // Buttons
-    else if (interaction.isButton()) {
-      if (interaction.customId.startsWith('event_')) {
-        if (interaction.customId.startsWith('event_move_confirm:')) {
-          await handleMoveConfirm(interaction);
+    else if (interaction$.isButton()) {
+      if (interaction$.customId.startsWith('event_')) {
+        if (interaction$.customId.startsWith('event_move_confirm:')) {
+          await handleMoveConfirm(interaction$);
         } else {
-          await handleEventButton(interaction);
+          await handleEventButton(interaction$);
         }
       }
     }
 
     // StringSelectMenu (selects de rol en flujos manuales)
-    else if (interaction.isStringSelectMenu()) {
-      if (interaction.customId.startsWith('event_add_role:')) {
-        await handleAddRoleSelect(interaction);
-      } else if (interaction.customId.startsWith('event_move_select_')) {
-        await handleMoveSelect(interaction);
+    else if (interaction$.isStringSelectMenu()) {
+      if (interaction$.customId.startsWith('event_add_role:')) {
+        await handleAddRoleSelect(interaction$);
+      } else if (interaction$.customId.startsWith('event_move_select_')) {
+        await handleMoveSelect(interaction$);
       }
     }
 
     // Modal submits (gestión manual + editar evento)
-    else if (interaction.isModalSubmit()) {
-      if (interaction.customId.startsWith('event_modal_edit:')) {
-        await handleEditModalSubmit(interaction);
-      } else if (interaction.customId.startsWith('event_modal_')) {
-        await handleEventModalSubmit(interaction);
+    else if (interaction$.isModalSubmit()) {
+      if (interaction$.customId.startsWith('event_modal_edit:')) {
+        await handleEditModalSubmit(interaction$);
+      } else if (interaction$.customId.startsWith('event_modal_')) {
+        await handleEventModalSubmit(interaction$);
       }
     }
 
   } catch (err) {
     console.error('❌ Error en interacción:', err);
     try {
-      if (!interaction.replied && !interaction.deferred) {
-        await interaction.reply({ content: '❌ Error interno', ephemeral: true });
-      } else if (interaction.deferred && !interaction.replied) {
+      if (!interaction$.replied && !interaction$.deferred) {
+        await interaction$.reply({ content: '❌ Error interno', ephemeral: true });
+      } else if (interaction$.deferred && !interaction$.replied) {
         const expired = err?.code === 50027 || err?.message?.includes('Invalid Webhook Token');
-        await interaction.editReply({
+        await interaction$.editReply({
           content: expired
             ? '❌ La interacción expiró. Vuelve a intentarlo.'
             : '❌ Error interno'

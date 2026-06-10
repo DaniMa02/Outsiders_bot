@@ -339,7 +339,7 @@ async function sendDmReminders(client, eventId) {
       if (!user) continue;
 
       const dmContent =
-        `⏰ **Recordatorio personal: ${config?.icon || '•'} ${event.title}**\n` +
+        `⏰ <@${p.discord_id}> **Recordatorio: ${config?.icon || '•'} ${event.title}**\n` +
         `Empieza en **15 minutos**.\n` +
         `📅 ${eventTime}\n` +
         `📍 Canal: <#${event.channel_id}>`;
