@@ -22,6 +22,7 @@ import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleM
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
 import { handleGuildMemberUpdateRoles } from './listeners/guildMemberUpdateRoles.js';
+import { initChatAutoClean } from './listeners/chatAutoClean.js';
 
 // ==================== SERVICIOS ====================
 import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
@@ -216,6 +217,7 @@ client.once(Events.ClientReady, async () => {
   initEmbedCleanupScheduler(client);
   await checkAndFixEventStatesOnStartup(client);
   await loadScheduledReminders(client);
+  await initChatAutoClean(client);
 });
 
 
