@@ -944,7 +944,7 @@ export const handleMoveConfirm = async (interaction) => {
   try {
     await interaction.deferUpdate();
 
-    await changeParticipantRole({ eventId, participantId, newRole });
+    await changeParticipantRole({ eventId, participantId, newRole, client: interaction.client, onUpdateEmbed: createOrUpdateEventEmbed });
     await createOrUpdateEventEmbed(interaction.client, eventId);
 
     clearMoveSelection(interaction.user.id, eventId);

@@ -77,6 +77,14 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
 
   // 3️⃣ Buscar participante existente
   const existing = await getParticipant(eventId, discordId);
+
+  // Guardar info del rol antiguo ANTES de cualquier UPDATE,
+  // para poder promover un RESERVE de ese rol si el usuario era ACTIVE
+  // y está cambiando de rol.
+  const oldRole = existing?.assigned_role || null;
+  const wasActive = existing?.state === PARTICIPANT_STATES.ACTIVE;
+  const isChangingRole = wasActive && oldRole && oldRole !== role;
+
   if (existing) {
     if (existing.state === PARTICIPANT_STATES.ACTIVE) {
       // Si ya está en el mismo rol, no hacer nada
@@ -110,7 +118,7 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
 
     if (currentCountForRole >= maxForRole) {
       // Rol está lleno → como RESERVE
-      return await upsertParticipant({
+      const result = await upsertParticipant({
         eventId,
         discordId,
         state: PARTICIPANT_STATES.RESERVE,
@@ -119,6 +127,14 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
         client,
         onUpdateEmbed
       });
+
+      // Si veníamos de un cambio de rol real (ACTIVE en otro rol), ese rol
+      // queda con un hueco libre: promover al primer RESERVE de oldRole.
+      if (isChangingRole) {
+        await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+      }
+
+      return result;
     }
   } else {
     // RAID: sin roles
@@ -131,7 +147,7 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
 
   if (maxPlayers !== null && currentCount >= maxPlayers) {
     // Evento lleno → como RESERVE
-    return await upsertParticipant({
+    const result = await upsertParticipant({
       eventId,
       discordId,
       state: PARTICIPANT_STATES.RESERVE,
@@ -140,10 +156,16 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
       client,
       onUpdateEmbed
     });
+
+    if (isChangingRole) {
+      await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+    }
+
+    return result;
   }
 
   // 6️⃣ Como ACTIVE
-  return await upsertParticipant({
+  const result = await upsertParticipant({
     eventId,
     discordId,
     state: PARTICIPANT_STATES.ACTIVE,
@@ -152,6 +174,12 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
     client,
     onUpdateEmbed
   });
+
+  if (isChangingRole) {
+    await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+  }
+
+  return result;
 }
 
 /**

@@ -2,6 +2,7 @@
 import { query } from '../db/database.js';
 import { getEvent } from './eventManager.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
+import { promoteReserveToActive } from './eventService.js';
 import {
   addParticipant,
   updateParticipantRole,
@@ -113,13 +114,18 @@ export async function addManualParticipant({ eventId, name, role }) {
  * Si el rol destino está lleno, hace SWAP: el activo más antiguo del rol
  * destino pasa a RESERVE y el participante pasa a ACTIVE en ese rol.
  *
+ * Tras el cambio, si el participante estaba ACTIVE en su rol antiguo,
+ * se promueve al primer RESERVE de ese rol para llenar el hueco libre.
+ *
  * @param {object} params
  * @param {number} params.eventId
  * @param {number} params.participantId
  * @param {string} params.newRole
+ * @param {object} [params.client] - Cliente Discord (necesario para actualizar embed)
+ * @param {function} [params.onUpdateEmbed] - Callback para refrescar embed
  * @returns {object} resultado del cambio
  */
-export async function changeParticipantRole({ eventId, participantId, newRole }) {
+export async function changeParticipantRole({ eventId, participantId, newRole, client = null, onUpdateEmbed = null }) {
   const event = await getEvent(eventId);
 
   if (event.status !== 'OPEN') {
@@ -153,6 +159,10 @@ export async function changeParticipantRole({ eventId, participantId, newRole })
     throw new Error(`❌ El participante ya está en el rol ${newRole.toUpperCase()}.`);
   }
 
+  // Guardar info del rol antiguo ANTES de modificar nada
+  const oldRole = part.assigned_role;
+  const wasActive = part.state === PARTICIPANT_STATES.ACTIVE;
+
   // Comprobar si el rol destino está lleno
   const countForRole = await countActiveParticipantsByRole(eventId, newRole);
   const isFull = countForRole >= config.max_roles[newRole];
@@ -161,6 +171,13 @@ export async function changeParticipantRole({ eventId, participantId, newRole })
     // El rol tiene espacio: mover y asegurar estado ACTIVE
     await reactivateParticipant({ participantId, state: PARTICIPANT_STATES.ACTIVE, assignedRole: newRole });
     console.log(`🔄 Participante ${participantId} → ACTIVE en ${newRole} (espacio libre)`);
+
+    // Si estaba ACTIVE en el rol antiguo, ese rol queda con un hueco libre:
+    // promover al primer RESERVE de ese rol (si lo hay)
+    if (wasActive && oldRole) {
+      await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+    }
+
     return { swapped: false, participantId, newRole };
   }
 
@@ -191,6 +208,12 @@ export async function changeParticipantRole({ eventId, participantId, newRole })
   await updateParticipantState(displacedId, PARTICIPANT_STATES.RESERVE);
 
   console.log(`🔄 Swap: participante ${displacedId} → RESERVE en ${newRole}, participante ${participantId} → ACTIVE en ${newRole}`);
+
+  // El participante salió del oldRole (era ACTIVE allí): queda un hueco libre.
+  // Promover al primer RESERVE de oldRole (si lo hay).
+  if (wasActive && oldRole) {
+    await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+  }
 
   return { swapped: true, participantId, newRole, displacedId };
 }

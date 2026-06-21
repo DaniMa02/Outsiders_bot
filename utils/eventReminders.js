@@ -440,4 +440,53 @@ export async function deleteReminderMessage(client, eventId) {
   }
 }
 
+/**
+ * Restaurar los recordatorios de un evento cancelado/finalizado por error.
+ *
+ * - Resetea los flags `sent` y `dm_sent` (y sus timestamps) en BD
+ * - Limpia el `reminder_message_id` por si quedó colgado
+ * - Recalcula los `send_at` a partir del `datetime` actual del evento
+ * - Cancela los timeouts antiguos en memoria (por si quedaran) y programa
+ *   los nuevos
+ *
+ * Se usa desde /restore_event cuando se reactiva un evento FINISHED.
+ */
+export const restoreReminders = async (client, eventId) => {
+  try {
+    const eventRes = await query(
+      'SELECT datetime FROM events WHERE id = $1',
+      [eventId]
+    );
+
+    if (eventRes.rowCount === 0) {
+      console.warn(`⚠️ restoreReminders: evento ${eventId} no existe`);
+      return;
+    }
+
+    const event = eventRes.rows[0];
+    const eventDate = new Date(event.datetime);
+
+    const newSendAt = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
+    const newDmSendAt = new Date(eventDate.getTime() - DM_REMINDER_OFFSET_MS);
+
+    // Resetear flags en BD
+    await query(
+      `UPDATE event_reminders
+       SET send_at = $1, sent = FALSE, sent_at = NULL, reminder_message_id = NULL,
+           dm_send_at = $2, dm_sent = FALSE, dm_sent_at = NULL
+       WHERE event_id = $3`,
+      [newSendAt.toISOString(), newDmSendAt.toISOString(), eventId]
+    );
+
+    // Cancelar timeouts anteriores (por si quedaron en memoria) y programar nuevos
+    cancelScheduledReminder(eventId);
+    scheduleEventReminder(client, eventId, newSendAt);
+    scheduleDmReminder(client, eventId, newDmSendAt);
+
+    console.log(`♻️ Recordatorios restaurados para evento ${eventId} → canal: ${newSendAt.toISOString()}, DM: ${newDmSendAt.toISOString()}`);
+  } catch (err) {
+    console.error(`❌ Error restaurando recordatorios de evento ${eventId}:`, err);
+  }
+};
+
 export { REMINDER_OFFSET_MS, DM_REMINDER_OFFSET_MS };
