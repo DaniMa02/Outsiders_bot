@@ -56,47 +56,59 @@ function scheduleEphemeralDeletion(interaction, message) {
 /**
  * Parchea una interacción para auto-borrar sus mensajes efímeros.
  * Modifica la interaction in-place y la devuelve.
+ *
+ * Solo parchea los métodos que existan en la interaction. Las
+ * AutocompleteInteraction no tienen `reply`/`editReply`/`followUp`
+ * (usan `respond`), así que las dejamos pasar sin tocar para que el
+ * wrapper no pete con "Cannot read properties of undefined (reading 'bind')".
+ *
  * @param {import('discord.js').Interaction} interaction
  * @returns {import('discord.js').Interaction} la misma interaction, ya parchada
  */
 export function withEphemeralAutoDelete(interaction) {
   // Guardamos los originales bound a la propia interaction para que `this`
   // dentro del método de discord.js sea SIEMPRE la interaction (no el wrapper)
-  const originalReply = interaction.reply.bind(interaction);
-  const originalEditReply = interaction.editReply.bind(interaction);
-  const originalFollowUp = interaction.followUp.bind(interaction);
 
-  interaction.reply = async function(options = {}) {
-    // Necesitamos el Message para poder borrarlo. Si el caller no pidió
-    // explícitamente fetchReply:false y el mensaje es efímero, añadimos
-    // fetchReply:true para que discord.js nos devuelva el Message.
-    if (options.ephemeral && options.fetchReply === undefined) {
-      const msg = await originalReply({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(interaction, msg);
-      return msg;
-    }
-    return originalReply(options);
-  };
+  if (typeof interaction.reply === 'function') {
+    const originalReply = interaction.reply.bind(interaction);
+    interaction.reply = async function(options = {}) {
+      // Necesitamos el Message para poder borrarlo. Si el caller no pidió
+      // explícitamente fetchReply:false y el mensaje es efímero, añadimos
+      // fetchReply:true para que discord.js nos devuelva el Message.
+      if (options.ephemeral && options.fetchReply === undefined) {
+        const msg = await originalReply({ ...options, fetchReply: true });
+        scheduleEphemeralDeletion(interaction, msg);
+        return msg;
+      }
+      return originalReply(options);
+    };
+  }
 
-  interaction.editReply = async function(options = {}) {
-    // Tras un deferReply({ephemeral:true}), el editReply resultante es efímero.
-    // Discord.js marca interaction.ephemeral=true en ese caso.
-    if (interaction.ephemeral && options.fetchReply === undefined) {
-      const msg = await originalEditReply({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(interaction, msg);
-      return msg;
-    }
-    return originalEditReply(options);
-  };
+  if (typeof interaction.editReply === 'function') {
+    const originalEditReply = interaction.editReply.bind(interaction);
+    interaction.editReply = async function(options = {}) {
+      // Tras un deferReply({ephemeral:true}), el editReply resultante es efímero.
+      // Discord.js marca interaction.ephemeral=true en ese caso.
+      if (interaction.ephemeral && options.fetchReply === undefined) {
+        const msg = await originalEditReply({ ...options, fetchReply: true });
+        scheduleEphemeralDeletion(interaction, msg);
+        return msg;
+      }
+      return originalEditReply(options);
+    };
+  }
 
-  interaction.followUp = async function(options = {}) {
-    if (options.ephemeral && options.fetchReply === undefined) {
-      const msg = await originalFollowUp({ ...options, fetchReply: true });
-      scheduleEphemeralDeletion(interaction, msg);
-      return msg;
-    }
-    return originalFollowUp(options);
-  };
+  if (typeof interaction.followUp === 'function') {
+    const originalFollowUp = interaction.followUp.bind(interaction);
+    interaction.followUp = async function(options = {}) {
+      if (options.ephemeral && options.fetchReply === undefined) {
+        const msg = await originalFollowUp({ ...options, fetchReply: true });
+        scheduleEphemeralDeletion(interaction, msg);
+        return msg;
+      }
+      return originalFollowUp(options);
+    };
+  }
 
   return interaction;
 }

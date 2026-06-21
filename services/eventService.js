@@ -254,6 +254,12 @@ export async function markEventAbsence({ eventId, participantId, discordId, clie
  * y entraríamos en recursión infinita (caso real: un `manual_xxx` sin
  * capability en BD). Usamos bucle con triedIds para garantizar la
  * terminación.
+ *
+ * Excepción: los participantes manuales (discord_id empieza por 'manual_')
+ * no tienen roles de Discord, así que `user_role_capabilities` siempre
+ * estaría vacío para ellos. Si un admin añadió manualmente a alguien
+ * con un rol, debemos fiarnos y promoverlo (si no, jamás podrían
+ * subir al equipo principal aunque el slot esté libre).
  */
 export async function promoteReserveToActive(eventId, roleNeeded, client, onUpdateEmbed) {
   const triedIds = [];
@@ -268,15 +274,22 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
       break;
     }
 
-    // 2️⃣ Validar que aún tiene la capability
-    const capabilities = await getUserCapabilities(reserve.discord_id);
-    if (!canUserFulfillRole(capabilities, roleNeeded)) {
-      console.log(`⚠️ RESERVE ${reserve.discord_id} ya no tiene capability para ${roleNeeded}, pasando al siguiente...`);
-      triedIds.push(reserve.id);
-      continue; // Probar siguiente
+    // 2️⃣ Para usuarios manuales nos fiamos del rol con el que el admin
+    //    los añadió (no tienen roles de Discord, así que la comprobación
+    //    de capability no aplicaría y jamás podrían subir).
+    const isManual = reserve.discord_id.startsWith('manual_');
+
+    if (!isManual) {
+      // 3️⃣ Validar que aún tiene la capability (solo usuarios reales)
+      const capabilities = await getUserCapabilities(reserve.discord_id);
+      if (!canUserFulfillRole(capabilities, roleNeeded)) {
+        console.log(`⚠️ RESERVE ${reserve.discord_id} ya no tiene capability para ${roleNeeded}, pasando al siguiente...`);
+        triedIds.push(reserve.id);
+        continue; // Probar siguiente
+      }
     }
 
-    // 3️⃣ Promover a ACTIVE
+    // 4️⃣ Promover a ACTIVE
     await updateParticipantState(reserve.id, PARTICIPANT_STATES.ACTIVE);
     console.log(`⬆️ RESERVE ${reserve.discord_id} promovido a ACTIVE para evento ${eventId} (rol: ${roleNeeded})`);
     promoted = true;
@@ -287,7 +300,7 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
     console.log(`ℹ️ No hay RESERVE disponible para cumplir rol ${roleNeeded} en evento ${eventId}`);
   }
 
-  // 4️⃣ Actualizar embed (una sola vez, al final)
+  // 5️⃣ Actualizar embed (una sola vez, al final)
   if (onUpdateEmbed) {
     queueEventUpdate(client, eventId, onUpdateEmbed);
   }
