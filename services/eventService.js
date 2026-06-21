@@ -246,38 +246,48 @@ export async function markEventAbsence({ eventId, participantId, discordId, clie
 // ==================== PROMOVER RESERVE A ACTIVE ====================
 
 /**
- * Promover RESERVE a ACTIVE si hay espacio y cumple rol
+ * Promover RESERVE a ACTIVE si hay espacio y cumple rol.
+ *
+ * IMPORTANTE: si un RESERVE no cumple la capability, probamos con el
+ * siguiente, pero tenemos que recordar los IDs ya probados. Si no,
+ * al re-lamar a getFirstReserveForRole nos devolvería el MISMO reserve
+ * y entraríamos en recursión infinita (caso real: un `manual_xxx` sin
+ * capability en BD). Usamos bucle con triedIds para garantizar la
+ * terminación.
  */
 export async function promoteReserveToActive(eventId, roleNeeded, client, onUpdateEmbed) {
-  // 1️⃣ Obtener primer RESERVE que pueda cumplir ese rol
-  const reserve = await getFirstReserveForRole(eventId, roleNeeded);
+  const triedIds = [];
+  let promoted = false;
 
-  if (!reserve) {
-    console.log(`ℹ️ No hay RESERVE disponible para cumplir rol ${roleNeeded} en evento ${eventId}`);
+  while (true) {
+    // 1️⃣ Obtener primer RESERVE que aún no hayamos probado
+    const reserve = await getFirstReserveForRole(eventId, roleNeeded, triedIds);
 
-    if (onUpdateEmbed) {
-      queueEventUpdate(client, eventId, onUpdateEmbed);
+    if (!reserve) {
+      // No hay más RESERVEs elegibles
+      break;
     }
 
-    return;
+    // 2️⃣ Validar que aún tiene la capability
+    const capabilities = await getUserCapabilities(reserve.discord_id);
+    if (!canUserFulfillRole(capabilities, roleNeeded)) {
+      console.log(`⚠️ RESERVE ${reserve.discord_id} ya no tiene capability para ${roleNeeded}, pasando al siguiente...`);
+      triedIds.push(reserve.id);
+      continue; // Probar siguiente
+    }
+
+    // 3️⃣ Promover a ACTIVE
+    await updateParticipantState(reserve.id, PARTICIPANT_STATES.ACTIVE);
+    console.log(`⬆️ RESERVE ${reserve.discord_id} promovido a ACTIVE para evento ${eventId} (rol: ${roleNeeded})`);
+    promoted = true;
+    break;
   }
 
-  // 2️⃣ Validar que aún tiene la capability
-  const capabilities = await getUserCapabilities(reserve.discord_id);
-  if (!canUserFulfillRole(capabilities, roleNeeded)) {
-    console.log(`⚠️ RESERVE ${reserve.discord_id} ya no tiene capability para ${roleNeeded}, pasando al siguiente...`);
-
-    // Intentar con siguiente RESERVE (recursivo)
-    await promoteReserveToActive(eventId, roleNeeded, client, onUpdateEmbed);
-    return;
+  if (!promoted) {
+    console.log(`ℹ️ No hay RESERVE disponible para cumplir rol ${roleNeeded} en evento ${eventId}`);
   }
 
-  // 3️⃣ Cambiar a ACTIVE
-  await updateParticipantState(reserve.id, PARTICIPANT_STATES.ACTIVE);
-
-  console.log(`⬆️ RESERVE ${reserve.discord_id} promovido a ACTIVE para evento ${eventId} (rol: ${roleNeeded})`);
-
-  // 4️⃣ Actualizar embed
+  // 4️⃣ Actualizar embed (una sola vez, al final)
   if (onUpdateEmbed) {
     queueEventUpdate(client, eventId, onUpdateEmbed);
   }

@@ -169,11 +169,15 @@ export async function updateEventStatus(eventId, status) {
 
   const updated = await updateEventStatusDB(eventId, status);
 
-  // Mantener caché sincronizado
-  if (status === 'FINISHED' || status === 'CLOSED') {
+  // Mantener caché sincronizado:
+  // - OPEN: el evento se queda/mete en el caché
+  // - FINISHED: lo mantenemos en caché con su updated_at para que
+  //   /restore_event pueda ofrecerlo en el autocomplete durante 24h
+  //   (addEventToCache descarta los FINISHED con más de 24h)
+  if (status === 'OPEN' || status === 'FINISHED') {
+    addEventToCache({ ...updated, status });
+  } else {
     removeEventFromCache(eventId);
-  } else if (status === 'OPEN') {
-    addEventToCache(updated);
   }
 
   console.log(`🔄 Estado de evento ${eventId} cambiado: ${event.status} → ${status}`);
@@ -193,9 +197,9 @@ export async function finishEvent(eventId, client) {
 
   await updateEventStatus(eventId, EVENT_STATES.FINISHED);
 
-  // Limpiar caché (el evento ya no es OPEN)
-  removeEventFromCache(eventId);
-
+  // Mantener el evento en el caché como FINISHED (con su updated_at) para
+  // que /restore_event pueda ofrecerlo en el autocomplete hasta 24h después.
+  // updateEventStatus ya hace addEventToCache con el status nuevo.
   console.log(`⏰ Evento ${eventId} finalizado (status = FINISHED)`);
 
   // Programar eliminación de embed después de 1 hora

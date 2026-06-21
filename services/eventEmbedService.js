@@ -60,7 +60,6 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     // El content con mención al rol solo se incluye en envíos NUEVOS,
     // no en edits (para no re-pingear al rol en cada update)
     const notifyContent = buildNotifyContent(config);
-    console.log(`[DEBUG embed ${eventId}] type=${event.type} channel=${event.channel_id} message_id=${event.message_id ?? 'NULL'} notifyContent=${notifyContent ?? 'NULL'} botVarsKeys=${Object.keys(getBotVariables()).filter(k => k.includes('NOTIFY')).join(',')}`);
 
     if (event.message_id) {
       try {

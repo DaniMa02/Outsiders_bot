@@ -225,9 +225,28 @@ export async function updateParticipantRole(participantId, role) {
 }
 
 /**
- * Obtener primer RESERVE que cumple rol específico
+ * Obtener primer RESERVE que cumple rol específico.
+ *
+ * @param {number} eventId
+ * @param {string} roleNeeded
+ * @param {number[]} [excludeIds] - IDs de participantes a excluir (p.ej.
+ *   los que ya probamos y no tenían capability, para no entrar en bucle).
  */
-export async function getFirstReserveForRole(eventId, roleNeeded) {
+export async function getFirstReserveForRole(eventId, roleNeeded, excludeIds = []) {
+  if (excludeIds.length > 0) {
+    const res = await query(
+      `SELECT ep.*, u.nickname
+       FROM event_participants ep
+       LEFT JOIN users u ON u.discord_id = ep.discord_id
+       WHERE ep.event_id = $1 AND ep.state = $2 AND ep.assigned_role = $3
+         AND NOT (ep.id = ANY($4::int[]))
+       ORDER BY ep.joined_at ASC
+       LIMIT 1`,
+      [eventId, 'RESERVE', roleNeeded, excludeIds]
+    );
+    return res.rows[0] || null;
+  }
+
   const res = await query(
     `SELECT ep.*, u.nickname
      FROM event_participants ep

@@ -28,7 +28,7 @@ import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
 
 // ==================== UTILITIES ====================
 import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
-import { loadOpenEventsCache } from './utils/eventCache.js';
+import { loadEventsCache } from './utils/eventCache.js';
 import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
 
 // ==================== SCHEDULER ====================
@@ -207,7 +207,7 @@ client.once(Events.ClientReady, async () => {
   // --- Cargar datos ---
   await loadBotVariables();
   const botVars = getBotVariables();
-  await loadOpenEventsCache();
+  await loadEventsCache();
   await loadScheduledMessages();
   scheduleAllMessages();
 

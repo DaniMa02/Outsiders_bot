@@ -5,10 +5,8 @@ import { getEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { EVENT_CONFIG, EVENT_STATES } from '../config/eventConfig.js';
 import { getBotVariables } from '../utils/botVariables.js';
-import { addEventToCache, getOpenEventsFromCache } from '../utils/eventCache.js';
+import { addEventToCache, getOpenEventsFromCache, getRecentFinishedEventsFromCache } from '../utils/eventCache.js';
 import { restoreReminders } from '../utils/eventReminders.js';
-
-const RECENT_FINISHED_HOURS = 24;
 
 /**
  * COMANDO: /restore_event
@@ -136,31 +134,26 @@ export const restoreEvent = {
           };
         });
 
-      // 2️⃣ Eventos FINISHED recientes (últimas 24h, para poder recuperar cancelados por error)
-      const finishedRes = await query(
-        `SELECT id, type, title, datetime
-         FROM events
-         WHERE status = 'FINISHED'
-           AND updated_at > NOW() - ($1::int * INTERVAL '1 hour')
-         ORDER BY updated_at DESC
-         LIMIT 25`,
-        [RECENT_FINISHED_HOURS]
-      );
-
-      const finishedChoices = finishedRes.rows.map(e => {
-        const dateStr = new Date(e.datetime).toLocaleString('es-ES', {
-          day: '2-digit',
-          month: '2-digit',
-          hour: '2-digit',
-          minute: '2-digit',
-          timeZone: 'Europe/Madrid'
+      // 2️⃣ Eventos FINISHED recientes (cache en memoria, últimas 24h)
+      // La misma solución que se aplicó en su día para los OPEN: el
+      // autocomplete no debe hacer query a la DB en cada keystroke
+      // (puede fallar por timeout de la Neon DB o de Discord).
+      const finishedChoices = getRecentFinishedEventsFromCache()
+        .filter(e => e && e.id != null && e.title && e.datetime && e.type)
+        .map(e => {
+          const dateStr = new Date(e.datetime).toLocaleString('es-ES', {
+            day: '2-digit',
+            month: '2-digit',
+            hour: '2-digit',
+            minute: '2-digit',
+            timeZone: 'Europe/Madrid'
+          });
+          const label = EVENT_CONFIG[e.type]?.label || e.type;
+          return {
+            name: `⛔ [${label}] ${e.title} — ${dateStr} (cancelado)`.slice(0, 100),
+            value: String(e.id)
+          };
         });
-        const label = EVENT_CONFIG[e.type]?.label || e.type;
-        return {
-          name: `⛔ [${label}] ${e.title} — ${dateStr} (cancelado)`.slice(0, 100),
-          value: String(e.id)
-        };
-      });
 
       // Combinar, filtrar y limitar a 25 (límite de Discord)
       const allChoices = [...openChoices, ...finishedChoices]
