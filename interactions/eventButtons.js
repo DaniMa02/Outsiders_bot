@@ -19,7 +19,7 @@ import { addManualParticipant, changeParticipantRole } from '../services/partici
 import { EVENT_CONFIG, isValidEventType, getEventConfig } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
-import { removeEventFromCache } from '../utils/eventCache.js';
+import { removeEventFromCache, addEventToCache } from '../utils/eventCache.js';
 import { cancelScheduledReminder, rescheduleReminder, deleteReminderMessage } from '../utils/eventReminders.js';
 import { parseDateTimeSpain, formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
 import { updateEvent } from '../services/eventManager.js';
@@ -345,12 +345,20 @@ async function handleCancelButton(interaction, eventData, user) {
       return safeReply(interaction, '❌ Solo Admin, Líder de Grupo o el creador pueden cancelar este evento.');
     }
 
-    // 3️⃣ Marcar como FINISHED en DB y limpiar caché
-    await query(
-      'UPDATE events SET status = $1, updated_at = NOW() WHERE id = $2',
+    // 3️⃣ Marcar como FINISHED en DB. Devolvemos la fila actualizada con
+    //    RETURNING para usar su updated_at al meterla en el caché como
+    //    FINISHED (addEventToCache descarta los FINISHED con más de 24h).
+    //    Esto permite que /restore_event siga ofreciendo el evento en
+    //    su autocomplete durante las 24h siguientes a la cancelación
+    //    (antes hacíamos removeEventFromCache y el evento desaparecía
+    //    de la lista nada más cancelarlo).
+    const updateRes = await query(
+      'UPDATE events SET status = $1, updated_at = NOW() WHERE id = $2 RETURNING *',
       ['FINISHED', eventData.id]
     );
-    removeEventFromCache(eventData.id);
+    if (updateRes.rowCount > 0) {
+      addEventToCache({ ...updateRes.rows[0], status: 'FINISHED' });
+    }
 
     // 3.5️⃣ Cancelar los recordatorios programados (canal + DM)
     cancelScheduledReminder(eventData.id);

@@ -117,7 +117,48 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
     const currentCountForRole = await countActiveParticipantsByRole(eventId, role);
 
     if (currentCountForRole >= maxForRole) {
-      // Rol está lleno → como RESERVE
+      // Rol está lleno. Si el usuario está cambiando de rol (era ACTIVE
+      // en otro rol), hacemos SWAP: el usuario toma el sitio y el ACTIVE
+      // más antiguo del rol destino baja a RESERVE. Esto da preferencia
+      // a la persona que quiere volver a su rol original (si se fue y
+      // una reserva le sustituyó, la reserva debe volver a RESERVE).
+      if (isChangingRole) {
+        const oldestActive = await query(
+          `SELECT id FROM event_participants
+           WHERE event_id = $1 AND assigned_role = $2 AND state = 'ACTIVE' AND id != $3
+           ORDER BY joined_at ASC
+           LIMIT 1`,
+          [eventId, role, existing.id]
+        );
+
+        if (oldestActive.rowCount > 0) {
+          const displacedId = oldestActive.rows[0].id;
+
+          // 1. El usuario toma el rol como ACTIVE
+          await reactivateParticipant({
+            participantId: existing.id,
+            state: PARTICIPANT_STATES.ACTIVE,
+            assignedRole: role
+          });
+
+          // 2. El desplazado pasa a RESERVE en el mismo rol
+          await updateParticipantState(displacedId, PARTICIPANT_STATES.RESERVE);
+
+          // 3. Como el usuario salió de oldRole, promover reserva de oldRole
+          await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+
+          console.log(`🔄 SWAP: participante ${displacedId} → RESERVE en ${role}, participante ${existing.id} → ACTIVE en ${role}`);
+
+          if (onUpdateEmbed) {
+            queueEventUpdate(client, eventId, onUpdateEmbed);
+          }
+
+          return { state: PARTICIPANT_STATES.ACTIVE, swapped: true };
+        }
+      }
+
+      // Si no hay ACTIVE con quien hacer SWAP (o no estamos cambiando
+      // de rol) → como RESERVE normal
       const result = await upsertParticipant({
         eventId,
         discordId,
