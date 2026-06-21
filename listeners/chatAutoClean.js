@@ -4,11 +4,11 @@ import { getBotVariables } from '../utils/botVariables.js';
 import { eventBus } from '../utils/eventBus.js';
 
 /**
- * Auto-limpieza de chat: borra mensajes con >15 min de antigüedad,
+ * Auto-limpieza de chat: borra mensajes con >1h de antigüedad,
  * EXCEPTO los embeds enviados por el propio bot (embeds de eventos).
  *
  * El borrado es POR MENSAJE: cada mensaje programa su propio setTimeout
- * para (createdTimestamp + 15min). No es un cron global.
+ * para (createdTimestamp + 1h). No es un cron global.
  *
  * Configuración: lee estas variables del bot y aplica auto-clean a sus canales.
  *   - RAID_CHANNEL_ID
@@ -19,10 +19,10 @@ import { eventBus } from '../utils/eventBus.js';
  *
  * Persistencia: si el bot se reinicia, al arrancar se escanean los
  * últimos 100 mensajes de cada canal configurado y se reprograma el
- * borrado de los que aún no han cumplido los 15 min.
+ * borrado de los que aún no han cumplido la 1h.
  */
 
-const FIFTEEN_MIN_MS = 15 * 60 * 1000;
+const ONE_HOUR_MS = 60 * 60 * 1000;
 const VAR_KEYS = ['RAID_CHANNEL_ID', 'HELL_CHANNEL_ID', 'HARDCORE_CHANNEL_ID'];
 const SCAN_LIMIT = 100;
 
@@ -67,7 +67,7 @@ const scheduleDeletion = (message) => {
   }
 
   const elapsed = Date.now() - message.createdTimestamp;
-  const delay = Math.max(0, FIFTEEN_MIN_MS - elapsed);
+  const delay = Math.max(0, ONE_HOUR_MS - elapsed);
 
   const timer = setTimeout(async () => {
     scheduledTimers.delete(message.id);
@@ -110,7 +110,7 @@ const scanChannelOnStartup = async (client, channelId) => {
       if (msg.pinned) continue;
 
       const age = now - msg.createdTimestamp;
-      if (age >= FIFTEEN_MIN_MS) {
+      if (age >= ONE_HOUR_MS) {
         await tryDelete(msg);
         immediate++;
       } else {
