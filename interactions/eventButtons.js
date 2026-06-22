@@ -11,12 +11,12 @@ import {
 import { query } from '../db/database.js';
 import { getUserCapabilities } from '../db/eventRepository.js';
 import { canUserFulfillRole } from '../config/eventRoleMapping.js';
-import { joinEvent, markEventAbsence } from '../services/eventService.js';
+import { joinEvent, markEventAbsence, toggleEventComposition } from '../services/eventService.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getEvent } from '../services/eventManager.js';
 import { getBotVariables } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole } from '../services/participantManager.js';
-import { EVENT_CONFIG, isValidEventType, getEventConfig } from '../config/eventConfig.js';
+import { EVENT_CONFIG, isValidEventType, getEventConfig, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
 import { removeEventFromCache, addEventToCache } from '../utils/eventCache.js';
@@ -44,7 +44,7 @@ export const handleEventButton = async (interaction) => {
 
   // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
   // porque showModal debe ser la primera respuesta de la interacción
-  if (['event_manual_add', 'event_manual_move', 'event_edit'].includes(customId)) {
+  if (['event_manual_add', 'event_manual_move', 'event_edit', 'event_toggle_composition'].includes(customId)) {
     try {
       // Para event_edit se necesita el evento completo (con created_by) para permisos
       let eventData = null;
@@ -82,6 +82,22 @@ export const handleEventButton = async (interaction) => {
         }
 
         await handleEditButton(interaction, eventData);
+      } else if (customId === 'event_toggle_composition') {
+        // Necesitamos el evento completo para validar permisos y tipo
+        const fullRes = await query('SELECT * FROM events WHERE id = $1', [eventData.id]);
+        if (fullRes.rowCount === 0) {
+          return await interaction.reply({ content: '❌ Evento no encontrado.', ephemeral: true });
+        }
+        fullEventForEdit = fullRes.rows[0];
+
+        if (!userCanManageEvent(interaction.member, fullEventForEdit)) {
+          return await interaction.reply({
+            content: '❌ Solo Admin, Líder de Grupo o el creador pueden cambiar la composición.',
+            ephemeral: true
+          });
+        }
+
+        await handleToggleCompositionButton(interaction, fullEventForEdit);
       } else {
         // Botones manuales
         if (!userCanManageManually(member)) {
@@ -420,6 +436,55 @@ async function handleCancelButton(interaction, eventData, user) {
 // ==================== HANDLERS DE GESTIÓN MANUAL ====================
 
 /**
+ * Manejar botón "Cambiar composición" (solo Hardcore).
+ * Toggle A ↔ B. Si el cambio deja sin slot a algún participante ACTIVE,
+ * lo baja automáticamente a RESERVE.
+ */
+async function handleToggleCompositionButton(interaction, event) {
+  try {
+    if (event.type !== 'hardcore') {
+      return await interaction.reply({
+        content: '❌ Solo los eventos Hardcore tienen composiciones alternativas.',
+        ephemeral: true
+      });
+    }
+
+    if (event.status !== 'OPEN') {
+      return await interaction.reply({
+        content: '❌ Este evento ya ha finalizado.',
+        ephemeral: true
+      });
+    }
+
+    const result = await toggleEventComposition({
+      eventId: event.id,
+      client: interaction.client,
+      onUpdateEmbed: createOrUpdateEventEmbed
+    });
+
+    const newLabel = result.newComposition === 1 ? 'B' : 'A';
+    let content = `✅ Composición cambiada a **${newLabel}**.`;
+
+    if (result.orphaned.length > 0) {
+      const orphanList = result.orphaned
+        .map(o => `<@${o.discordId}> (${(o.assignedRole || 'sin rol').toUpperCase()})`)
+        .join('\n• ');
+      content += `\n\n⚠️ **Bajados a RESERVE** por cambio de cupos:\n• ${orphanList}`;
+    }
+
+    return await interaction.reply({ content, ephemeral: true });
+
+  } catch (err) {
+    console.error('❌ Error en handleToggleCompositionButton:', err);
+    try {
+      if (!interaction.replied) {
+        await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      }
+    } catch {}
+  }
+}
+
+/**
  * Comprobar si el miembro puede gestionar participantes manualmente
  */
 function userCanManageManually(member) {
@@ -502,6 +567,7 @@ async function handleManualAddButton(interaction, eventData) {
 async function handleManualMoveButton(interaction, eventData) {
   try {
     const config = EVENT_CONFIG[eventData.type];
+    const maxRoles = getMaxRolesForEvent(eventData);
 
     if (!config.roles_required) {
       return await interaction.reply({ content: '❌ Este evento no tiene roles.', ephemeral: true });
@@ -544,7 +610,7 @@ async function handleManualMoveButton(interaction, eventData) {
       .setPlaceholder('Nuevo rol')
       .setRequired(true)
       .addOptions(
-        Object.keys(config.max_roles).map(roleKey => ({
+        Object.keys(maxRoles).map(roleKey => ({
           label: `${ROLE_EMOJIS[roleKey] || '•'} ${ROLE_NAMES[roleKey] || roleKey}`,
           value: roleKey
         }))
@@ -627,6 +693,7 @@ async function handleAddModalSubmit(interaction, eventId) {
   // Comprobar tipo de evento
   const event = await getEvent(eventId);
   const config = EVENT_CONFIG[event.type];
+  const maxRoles = getMaxRolesForEvent(event);
 
   // Si NO requiere roles (Raid), crear directamente
   if (!config.roles_required) {
@@ -647,7 +714,7 @@ async function handleAddModalSubmit(interaction, eventId) {
     .setPlaceholder('Selecciona el rol')
     .setRequired(true)
     .addOptions(
-      Object.keys(config.max_roles).map(roleKey => ({
+      Object.keys(maxRoles).map(roleKey => ({
         label: `${ROLE_EMOJIS[roleKey] || '•'} ${ROLE_NAMES[roleKey] || roleKey}`,
         value: roleKey
       }))
@@ -990,7 +1057,7 @@ async function safeReplySelect(interaction, content) {
  */
 async function getEventFromMessageId(messageId) {
   const res = await query(
-    'SELECT id, type, title, datetime, channel_id, status FROM events WHERE message_id = $1',
+    'SELECT id, type, title, datetime, channel_id, status, composition FROM events WHERE message_id = $1',
     [messageId]
   );
 

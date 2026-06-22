@@ -112,13 +112,17 @@ export const createEvent = {
       }
 
       // 🔹 Crear evento
+      // Para Hardcore la composición se persiste con default 0 (A).
+      // El admin puede cambiarla después con el botón "Cambiar composición"
+      // del embed (ver handleToggleCompositionButton).
       const event = await createEventInDB({
         type: tipo,
         title: titulo,
         datetime: datetime.toISOString(),
         channelId: channelId,
         createdBy: interaction.user.id,
-        client: interaction.client
+        client: interaction.client,
+        composition: 0
       });
 
       // 🔹 Generar y enviar embed

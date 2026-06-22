@@ -52,12 +52,12 @@ export async function getEventsToFinish() {
 /**
  * Crear evento
  */
-export async function createEvent({ type, title, datetime, channelId, createdBy }) {
+export async function createEvent({ type, title, datetime, channelId, createdBy, composition = null }) {
   const res = await query(
-    `INSERT INTO events (type, title, datetime, channel_id, created_by, status, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, NOW(), NOW())
-     RETURNING id, type, title, datetime, channel_id, status`,
-    [type, title, datetime, channelId, createdBy, 'OPEN']
+    `INSERT INTO events (type, title, datetime, channel_id, created_by, status, composition, created_at, updated_at)
+     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
+     RETURNING id, type, title, datetime, channel_id, status, composition`,
+    [type, title, datetime, channelId, createdBy, 'OPEN', composition]
   );
   return res.rows[0];
 }

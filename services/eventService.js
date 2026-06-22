@@ -14,7 +14,7 @@ import {
 import { getUserCapabilities } from '../db/eventRepository.js';
 import { getEvent, getEventMaxPlayers, eventHasRoles } from './eventManager.js';
 import { canUserFulfillRole } from '../config/eventRoleMapping.js';
-import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
+import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent } from '../config/eventConfig.js';
 
 /**
  * SERVICIO DE EVENTOS
@@ -111,9 +111,12 @@ export async function joinEvent({ eventId, discordId, role = null, client, onUpd
       throw new Error(`❌ No cumples requisitos para el rol ${role.toUpperCase()}.`);
     }
 
-    // Validar que ese rol no esté lleno
-    const config = EVENT_CONFIG[event.type];
-    const maxForRole = config.max_roles[role];
+    // Validar que ese rol no esté lleno (respetando la composición del evento)
+    const maxRoles = getMaxRolesForEvent(event);
+    if (!(role in maxRoles)) {
+      throw new Error(`❌ El rol ${role.toUpperCase()} no existe en la composición actual.`);
+    }
+    const maxForRole = maxRoles[role];
     const currentCountForRole = await countActiveParticipantsByRole(eventId, role);
 
     if (currentCountForRole >= maxForRole) {
@@ -458,12 +461,100 @@ export async function canEventAcceptMore(eventId) {
  */
 export async function isRoleFull(eventId, role) {
   const event = await getEvent(eventId);
-  const config = EVENT_CONFIG[event.type];
+  const maxRoles = getMaxRolesForEvent(event);
 
-  if (!config.max_roles[role]) {
-    return false; // Rol no existe para este tipo
+  if (!maxRoles[role]) {
+    return false; // Rol no existe para este tipo / composición
   }
 
   const current = await countActiveParticipantsByRole(eventId, role);
-  return current >= config.max_roles[role];
+  return current >= maxRoles[role];
+}
+
+// ==================== TOGGLE COMPOSICIÓN ====================
+
+/**
+ * Cambiar la composición alternativa de un evento Hardcore (A ↔ B).
+ *
+ * Si el cambio deja sin slot a algún participante ACTIVE, lo baja
+ * automáticamente a RESERVE para no romper la lógica de cupos:
+ *   - A → B: cualquier ACTIVE con rol 'debuffer' (el slot desaparece en B)
+ *   - B → A: los DD ACTIVOS que excedan el nuevo max (B=5, A=4).
+ *            Se baja a los últimos en apuntarse (latest joined_at).
+ *
+ * Un participante en RESERVE con un rol que deja de existir se queda
+ * como está (con assigned_role inválido) para que el admin lo reasigne
+ * o borre manualmente.
+ *
+ * @param {object} params
+ * @param {number} params.eventId
+ * @param {object} [params.client] - Cliente Discord (necesario para re-renderizar embed)
+ * @param {function} [params.onUpdateEmbed] - Callback para refrescar el embed
+ * @returns {object} { newComposition, orphaned: Array<{id, discordId, assignedRole}> }
+ */
+export async function toggleEventComposition({ eventId, client = null, onUpdateEmbed = null }) {
+  const event = await getEvent(eventId);
+
+  if (event.type !== 'hardcore') {
+    throw new Error('❌ Este evento no tiene composiciones alternativas.');
+  }
+
+  const current = event.composition; // 0 (A) o 1 (B)
+  const next = current === 1 ? 0 : 1;
+  const orphaned = [];
+
+  if (current === 0 && next === 1) {
+    // A → B: el slot 'debuffer' desaparece
+    const res = await query(
+      `SELECT id, discord_id, assigned_role
+       FROM event_participants
+       WHERE event_id = $1 AND state = 'ACTIVE'
+         AND LOWER(assigned_role) = 'debuffer'`,
+      [eventId]
+    );
+    orphaned.push(...res.rows);
+  } else if (current === 1 && next === 0) {
+    // B → A: dd pasa de 5 a 4 slots. Bajamos a los últimos DD apuntados.
+    const res = await query(
+      `SELECT id, discord_id, assigned_role
+       FROM event_participants
+       WHERE event_id = $1 AND state = 'ACTIVE'
+         AND LOWER(assigned_role) = 'dd'
+       ORDER BY joined_at ASC`,
+      [eventId]
+    );
+    const allDds = res.rows;
+    // Los 4 primeros (joined_at más antiguos) mantienen el slot, el resto se baja.
+    if (allDds.length > 4) {
+      orphaned.push(...allDds.slice(4));
+    }
+  }
+
+  // Bajar huérfanos a RESERVE
+  for (const p of orphaned) {
+    await updateParticipantState(p.id, PARTICIPANT_STATES.RESERVE);
+    console.log(`⬇️ Toggle composición evento ${eventId}: ${p.discord_id} (${p.assigned_role}) → RESERVE (huérfano)`);
+  }
+
+  // Persistir la nueva composición
+  await query(
+    'UPDATE events SET composition = $1, updated_at = NOW() WHERE id = $2',
+    [next, eventId]
+  );
+
+  // Re-renderizar embed
+  if (onUpdateEmbed && client) {
+    queueEventUpdate(client, eventId, onUpdateEmbed);
+  }
+
+  console.log(`🔄 Composición evento ${eventId}: ${current === 0 ? 'A' : 'B'} → ${next === 0 ? 'A' : 'B'} (${orphaned.length} huérfanos)`);
+
+  return {
+    newComposition: next,
+    orphaned: orphaned.map(p => ({
+      id: p.id,
+      discordId: p.discord_id,
+      assignedRole: p.assigned_role
+    }))
+  };
 }

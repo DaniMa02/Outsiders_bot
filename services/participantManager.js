@@ -1,7 +1,7 @@
 // services/participantManager.js
 import { query } from '../db/database.js';
 import { getEvent } from './eventManager.js';
-import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
+import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { promoteReserveToActive } from './eventService.js';
 import {
   addParticipant,
@@ -47,6 +47,7 @@ export async function addManualParticipant({ eventId, name, role }) {
   }
 
   const config = EVENT_CONFIG[event.type];
+  const maxRoles = getMaxRolesForEvent(event);
   const trimmedName = name.trim();
   const sanitizedName = trimmedName.toLowerCase().replace(/[^a-z0-9]/g, '_').slice(0, 40);
   const fakeId = `${FAKE_ID_PREFIX}${eventId}_${sanitizedName}`;
@@ -66,7 +67,7 @@ export async function addManualParticipant({ eventId, name, role }) {
     if (!role) {
       throw new Error('❌ Este evento requiere que especifiques un rol.');
     }
-    if (!config.max_roles[role]) {
+    if (!maxRoles[role]) {
       throw new Error(`❌ Rol no válido: ${role}.`);
     }
   } else {
@@ -86,7 +87,7 @@ export async function addManualParticipant({ eventId, name, role }) {
 
   if (config.roles_required) {
     const countForRole = await countActiveParticipantsByRole(eventId, role);
-    if (countForRole >= config.max_roles[role]) {
+    if (countForRole >= maxRoles[role]) {
       state = PARTICIPANT_STATES.RESERVE;
     }
   } else if (config.max_players !== null) {
@@ -133,12 +134,13 @@ export async function changeParticipantRole({ eventId, participantId, newRole, c
   }
 
   const config = EVENT_CONFIG[event.type];
+  const maxRoles = getMaxRolesForEvent(event);
 
   if (!config.roles_required) {
     throw new Error('❌ Este evento no tiene roles que cambiar.');
   }
 
-  if (!config.max_roles[newRole]) {
+  if (!maxRoles[newRole]) {
     throw new Error(`❌ Rol no válido: ${newRole}.`);
   }
 
@@ -165,7 +167,7 @@ export async function changeParticipantRole({ eventId, participantId, newRole, c
 
   // Comprobar si el rol destino está lleno
   const countForRole = await countActiveParticipantsByRole(eventId, newRole);
-  const isFull = countForRole >= config.max_roles[newRole];
+  const isFull = countForRole >= maxRoles[newRole];
 
   if (!isFull) {
     // El rol tiene espacio: mover y asegurar estado ACTIVE

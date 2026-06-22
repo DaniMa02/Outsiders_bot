@@ -8,7 +8,7 @@ import {
 import { query } from '../db/database.js';
 import { getEvent, formatEventInfo } from './eventManager.js';
 import { getEventParticipantsSummary, getAllEventParticipantsWithPosition } from './eventService.js';
-import { EVENT_CONFIG, PARTICIPANT_STATES } from '../config/eventConfig.js';
+import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent, getCompositionLabel, getToggleCompositionLabel } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { getBotVariables } from '../utils/botVariables.js';
 
@@ -49,6 +49,16 @@ export async function createOrUpdateEventEmbed(client, eventId) {
 
     // 3️⃣ Construir botones
     const buttonRows = buildEventButtons(event, config);
+
+    // 4️⃣ Si el evento tiene composición alternativa, añadirla al footer
+    const compLabel = getCompositionLabel(event);
+    if (compLabel) {
+      const existingFooter = embed.data.footer?.text || '';
+      const statusPart = existingFooter.startsWith('Estado:')
+        ? existingFooter
+        : `Estado: ${event.status}`;
+      embed.setFooter({ text: `Composición ${compLabel} · ${statusPart}` });
+    }
 
     // 4️⃣ Enviar o editar mensaje
     const channel = await client.channels.fetch(event.channel_id);
@@ -357,7 +367,7 @@ function buildEventButtons(event, config) {
   if (config.roles_required) {
     // Hell / Hardcore: solo botones de rol + ausencia
     // (el botón JOIN no tiene sentido: para unirse hay que elegir rol)
-    const roleButtons = buildRoleButtons(config);
+    const roleButtons = buildRoleButtons(event, config);
     rows.push(roleButtons);
 
     const absenceRow = new ActionRowBuilder().addComponents(
@@ -384,7 +394,8 @@ function buildEventButtons(event, config) {
 
   // Gestión manual (solo usable por Admin/Líder de Grupo, validado en el handler)
   if (config.roles_required) {
-    const manualRow = new ActionRowBuilder().addComponents(
+    const manualRow = new ActionRowBuilder();
+    manualRow.addComponents(
       new ButtonBuilder()
         .setCustomId('event_manual_add')
         .setLabel('➕ Añadir manual')
@@ -394,6 +405,18 @@ function buildEventButtons(event, config) {
         .setLabel('✏️ Mover rol')
         .setStyle(ButtonStyle.Secondary)
     );
+
+    // Hardcore: botón extra para cambiar entre composición A y B
+    const toggleLabel = getToggleCompositionLabel(event);
+    if (toggleLabel) {
+      manualRow.addComponents(
+        new ButtonBuilder()
+          .setCustomId('event_toggle_composition')
+          .setLabel(toggleLabel)
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+
     rows.push(manualRow);
   } else {
     const manualRow = new ActionRowBuilder().addComponents(
@@ -422,12 +445,14 @@ function buildEventButtons(event, config) {
 }
 
 /**
- * Construir botones de selección de rol
+ * Construir botones de selección de rol.
+ * Respeta la composición elegida para el evento (ej: Hardcore A vs B).
  */
-function buildRoleButtons(config) {
+function buildRoleButtons(event, config) {
   const row = new ActionRowBuilder();
+  const maxRoles = getMaxRolesForEvent(event);
 
-  for (const roleKey of Object.keys(config.max_roles)) {
+  for (const roleKey of Object.keys(maxRoles)) {
     const emoji = ROLE_EMOJIS[roleKey] || '❓';
     const roleName = ROLE_NAMES[roleKey] || roleKey;
 

@@ -36,7 +36,7 @@ import {
  * @param {object} [params.client] - Cliente Discord (necesario para programar recordatorio)
  * @returns {object} evento creado
  */
-export async function createEvent({ type, title, datetime, channelId, createdBy, client = null }) {
+export async function createEvent({ type, title, datetime, channelId, createdBy, client = null, composition = null }) {
   // 1️⃣ Validar tipo de evento
   if (!isValidEventType(type)) {
     throw new Error(`❌ Tipo de evento no válido: ${type}. Disponibles: ${Object.keys(EVENT_CONFIG).join(', ')}`);
@@ -64,7 +64,8 @@ export async function createEvent({ type, title, datetime, channelId, createdBy,
     title,
     datetime: eventDate.toISOString(),
     channelId,
-    createdBy
+    createdBy,
+    composition
   });
 
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
