@@ -472,6 +472,13 @@ async function handleToggleCompositionButton(interaction, event) {
       content += `\n\n⚠️ **Bajados a RESERVE** por cambio de cupos:\n• ${orphanList}`;
     }
 
+    if (result.promoted.length > 0) {
+      const promotedList = result.promoted
+        .map(p => `<@${p.discordId}> (${(p.assignedRole || 'sin rol').toUpperCase()})`)
+        .join('\n• ');
+      content += `\n\n⬆️ **Promovidos a ACTIVE** al liberarse cupos:\n• ${promotedList}`;
+    }
+
     return await interaction.reply({ content, ephemeral: true });
 
   } catch (err) {

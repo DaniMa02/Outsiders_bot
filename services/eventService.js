@@ -307,7 +307,7 @@ export async function markEventAbsence({ eventId, participantId, discordId, clie
  */
 export async function promoteReserveToActive(eventId, roleNeeded, client, onUpdateEmbed) {
   const triedIds = [];
-  let promoted = false;
+  let promoted = null;
 
   while (true) {
     // 1️⃣ Obtener primer RESERVE que aún no hayamos probado
@@ -336,7 +336,7 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
     // 4️⃣ Promover a ACTIVE
     await updateParticipantState(reserve.id, PARTICIPANT_STATES.ACTIVE);
     console.log(`⬆️ RESERVE ${reserve.discord_id} promovido a ACTIVE para evento ${eventId} (rol: ${roleNeeded})`);
-    promoted = true;
+    promoted = reserve;
     break;
   }
 
@@ -348,6 +348,8 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
   if (onUpdateEmbed) {
     queueEventUpdate(client, eventId, onUpdateEmbed);
   }
+
+  return promoted;
 }
 
 // ==================== ACTUALIZAR PARTICIPANTE ====================
@@ -542,16 +544,40 @@ export async function toggleEventComposition({ eventId, client = null, onUpdateE
     [next, eventId]
   );
 
-  // Re-renderizar embed
+  // Promover RESERVEs que ahora tienen slot en la nueva composición.
+  // Ej: A→B con 4 DD + 1 DD en RESERVE → el 5º DD se promueve a ACTIVE.
+  //     B→A con debuffer en RESERVE → el debuffer se promueve a ACTIVE.
+  // Usamos la composición ya persistida (next) para resolver los max_roles.
+  const newMaxRoles = getMaxRolesForEvent({ ...event, composition: next });
+  const promoted = [];
+  for (const roleKey of Object.keys(newMaxRoles)) {
+    const max = newMaxRoles[roleKey];
+    let safety = 10; // defensivo: no hay rol con más de 5-6 reservas normalmente
+    while (safety-- > 0) {
+      const result = await promoteReserveToActive(eventId, roleKey, client, onUpdateEmbed);
+      if (!result) break; // no hay más reservas elegibles para este rol
+      promoted.push(result);
+      const currentCount = await countActiveParticipantsByRole(eventId, roleKey);
+      if (currentCount >= max) break; // cupos llenos
+    }
+  }
+
+  // Re-renderizar embed (queueEventUpdate dedupea por eventId, así que
+  // la cola lo ejecuta una sola vez al final con todos los cambios)
   if (onUpdateEmbed && client) {
     queueEventUpdate(client, eventId, onUpdateEmbed);
   }
 
-  console.log(`🔄 Composición evento ${eventId}: ${current === 0 ? 'A' : 'B'} → ${next === 0 ? 'A' : 'B'} (${orphaned.length} huérfanos)`);
+  console.log(`🔄 Composición evento ${eventId}: ${current === 0 ? 'A' : 'B'} → ${next === 0 ? 'A' : 'B'} (${orphaned.length} huérfanos, ${promoted.length} promovidos)`);
 
   return {
     newComposition: next,
     orphaned: orphaned.map(p => ({
+      id: p.id,
+      discordId: p.discord_id,
+      assignedRole: p.assigned_role
+    })),
+    promoted: promoted.map(p => ({
       id: p.id,
       discordId: p.discord_id,
       assignedRole: p.assigned_role
