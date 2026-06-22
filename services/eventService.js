@@ -547,18 +547,21 @@ export async function toggleEventComposition({ eventId, client = null, onUpdateE
   // Promover RESERVEs que ahora tienen slot en la nueva composición.
   // Ej: A→B con 4 DD + 1 DD en RESERVE → el 5º DD se promueve a ACTIVE.
   //     B→A con debuffer en RESERVE → el debuffer se promueve a ACTIVE.
-  // Usamos la composición ya persistida (next) para resolver los max_roles.
+  // IMPORTANTE: comprobar el cap ANTES de promover. Si no, un orphan recién
+  // bajado a RESERVE podría ser promovido de vuelta en la misma operación
+  // (B→A con 5 DD: el 5º baja a RESERVE, count=4, cap=4 → si promovemos
+  // sin chequear, vuelve a ACTIVE y la composición queda con 5 ACTIVE en A).
   const newMaxRoles = getMaxRolesForEvent({ ...event, composition: next });
   const promoted = [];
   for (const roleKey of Object.keys(newMaxRoles)) {
     const max = newMaxRoles[roleKey];
     let safety = 10; // defensivo: no hay rol con más de 5-6 reservas normalmente
     while (safety-- > 0) {
+      const currentCount = await countActiveParticipantsByRole(eventId, roleKey);
+      if (currentCount >= max) break; // cap lleno, no promover
       const result = await promoteReserveToActive(eventId, roleKey, client, onUpdateEmbed);
       if (!result) break; // no hay más reservas elegibles para este rol
       promoted.push(result);
-      const currentCount = await countActiveParticipantsByRole(eventId, roleKey);
-      if (currentCount >= max) break; // cupos llenos
     }
   }
 
