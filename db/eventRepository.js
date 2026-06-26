@@ -319,16 +319,25 @@ export async function getOrCreateUser(discordId, nickname) {
 
 /**
  * Asignar clase a usuario (ARCHER, SWORDSMAN, MAGE, MARTIAL_ARTIST)
+ *
+ * Crea la fila si no existe. Si existe y la clase ya es la misma,
+ * la rama DO UPDATE es un no-op (WHERE class IS DISTINCT FROM
+ * EXCLUDED.class). Así evitamos un write en cada GuildMemberUpdate
+ * aunque la clase no haya cambiado.
  */
 export async function setUserClass(discordId, chosenClass) {
   try {
-    await query(`
+    const res = await query(`
       INSERT INTO users (discord_id, class)
       VALUES ($1, $2)
-      ON CONFLICT (discord_id) DO UPDATE SET class = $2;
+      ON CONFLICT (discord_id) DO UPDATE
+        SET class = EXCLUDED.class
+        WHERE users.class IS DISTINCT FROM EXCLUDED.class;
     `, [discordId, chosenClass]);
 
-    console.log(`✅ Clase de ${discordId} asignada: ${chosenClass}`);
+    if (res.rowCount > 0) {
+      console.log(`✅ Clase de ${discordId} asignada: ${chosenClass}`);
+    }
   } catch (err) {
     console.error(`❌ Error asignando clase a ${discordId}:`, err);
   }

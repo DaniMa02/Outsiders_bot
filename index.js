@@ -21,7 +21,6 @@ import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleM
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
-import { handleGuildMemberUpdateRoles } from './listeners/guildMemberUpdateRoles.js';
 import { initChatAutoClean } from './listeners/chatAutoClean.js';
 
 // ==================== SERVICIOS ====================
@@ -319,8 +318,9 @@ client.on('rateLimit', (info) => {
 
 // ---------------- Guild Member Update ----------------
 
-client.on(Events.GuildMemberUpdate, handleGuildMemberUpdate);
-client.on(Events.GuildMemberUpdate, handleGuildMemberUpdateRoles(client));
+// Un único listener unificado: clase + nickname + capabilities + recálculo
+// de eventos, con debounce y comparaciones para no escribir si nada cambió.
+client.on(Events.GuildMemberUpdate, handleGuildMemberUpdate(client));
 
 
 // ---------------- Express ----------------

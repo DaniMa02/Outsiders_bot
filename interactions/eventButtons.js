@@ -1026,8 +1026,10 @@ export const handleMoveConfirm = async (interaction) => {
   try {
     await interaction.deferUpdate();
 
+    // changeParticipantRole ya encola createOrUpdateEventEmbed vía onUpdateEmbed,
+    // así que NO hace falta llamarla otra vez aquí (sería un segundo edit del
+    // mismo embed, con sus 5-6 queries a BD + 1 llamada a la API de Discord).
     await changeParticipantRole({ eventId, participantId, newRole, client: interaction.client, onUpdateEmbed: createOrUpdateEventEmbed });
-    await createOrUpdateEventEmbed(interaction.client, eventId);
 
     clearMoveSelection(interaction.user.id, eventId);
 
