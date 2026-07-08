@@ -72,6 +72,8 @@ export function withEphemeralAutoDelete(interaction) {
   if (typeof interaction.reply === 'function') {
     const originalReply = interaction.reply.bind(interaction);
     interaction.reply = async function(options = {}) {
+      // Soportar llamada con string suelto: reply('hola')
+      if (typeof options === 'string') options = { content: options };
       // Necesitamos el Message para poder borrarlo. Si el caller no pidió
       // explícitamente fetchReply:false y el mensaje es efímero, añadimos
       // fetchReply:true para que discord.js nos devuelva el Message.
@@ -87,6 +89,8 @@ export function withEphemeralAutoDelete(interaction) {
   if (typeof interaction.editReply === 'function') {
     const originalEditReply = interaction.editReply.bind(interaction);
     interaction.editReply = async function(options = {}) {
+      // Soportar llamada con string suelto: editReply('hola')
+      if (typeof options === 'string') options = { content: options };
       // Tras un deferReply({ephemeral:true}), el editReply resultante es efímero.
       // Discord.js marca interaction.ephemeral=true en ese caso.
       if (interaction.ephemeral && options.fetchReply === undefined) {
@@ -101,6 +105,8 @@ export function withEphemeralAutoDelete(interaction) {
   if (typeof interaction.followUp === 'function') {
     const originalFollowUp = interaction.followUp.bind(interaction);
     interaction.followUp = async function(options = {}) {
+      // Soportar llamada con string suelto: followUp('hola')
+      if (typeof options === 'string') options = { content: options };
       if (options.ephemeral && options.fetchReply === undefined) {
         const msg = await originalFollowUp({ ...options, fetchReply: true });
         scheduleEphemeralDeletion(interaction, msg);

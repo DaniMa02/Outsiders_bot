@@ -59,6 +59,6 @@ export const debugMyPermissions = {
       lines.push('Usa `/add_variable ROLE_LIDER_GRUPO <id_del_rol>` para guardarlo.');
     }
 
-    await interaction.editReply(lines.join('\n'));
+    await interaction.editReply({ content: lines.join('\n') });
   }
 };
