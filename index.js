@@ -7,6 +7,7 @@ import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
 import { createEvent } from './commands/createEvent.js';
 import { restoreEvent } from './commands/restoreEvent.js';
+import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
 import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
@@ -17,7 +18,7 @@ import { query } from './db/database.js';
 import https from "https";
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -168,7 +169,10 @@ const commands = [
 
   // Events
   createEvent,
-  restoreEvent
+  restoreEvent,
+
+  // Debug
+  debugMyPermissions
 ];
 
 // ---------------- Client Ready ----------------
@@ -211,6 +215,19 @@ client.once(Events.ClientReady, async () => {
   await loadScheduledMessages();
   scheduleAllMessages();
 
+  // ==================== ONE-TIME SYNC ====================
+  // Si RUN_SYNC=1 en .env, ejecuta la sincronización inicial de
+  // users + user_role_capabilities y avisa al final. Cuando termine,
+  // quitar la variable de .env y reiniciar.
+  if (process.env.RUN_SYNC === '1') {
+    try {
+      const { runOneTimeSync } = await import('./utils/oneTimeSync.js');
+      await runOneTimeSync(client);
+    } catch (err) {
+      console.error('❌ [SYNC] Error durante la sincronización:', err);
+    }
+  }
+
   // ==================== EVENTS SCHEDULER ====================
   initEventLifecycleScheduler(client);
   initEmbedCleanupScheduler(client);
@@ -248,6 +265,8 @@ client.on(Events.InteractionCreate, async interaction => {
       if (interaction$.customId.startsWith('event_')) {
         if (interaction$.customId.startsWith('event_move_confirm:')) {
           await handleMoveConfirm(interaction$);
+        } else if (interaction$.customId.startsWith('event_remove_confirm:')) {
+          await handleRemoveConfirm(interaction$);
         } else {
           await handleEventButton(interaction$);
         }
@@ -260,6 +279,8 @@ client.on(Events.InteractionCreate, async interaction => {
         await handleAddRoleSelect(interaction$);
       } else if (interaction$.customId.startsWith('event_move_select_')) {
         await handleMoveSelect(interaction$);
+      } else if (interaction$.customId.startsWith('event_remove_select_')) {
+        await handleRemoveSelect(interaction$);
       }
     }
 

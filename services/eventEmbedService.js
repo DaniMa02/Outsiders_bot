@@ -403,6 +403,10 @@ function buildEventButtons(event, config) {
       new ButtonBuilder()
         .setCustomId('event_manual_move')
         .setLabel('✏️ Mover rol')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('event_manual_remove')
+        .setLabel('🗑️ Eliminar')
         .setStyle(ButtonStyle.Secondary)
     );
 
@@ -423,6 +427,10 @@ function buildEventButtons(event, config) {
       new ButtonBuilder()
         .setCustomId('event_manual_add')
         .setLabel('➕ Añadir manual')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('event_manual_remove')
+        .setLabel('🗑️ Eliminar')
         .setStyle(ButtonStyle.Secondary)
     );
     rows.push(manualRow);

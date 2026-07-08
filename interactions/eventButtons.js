@@ -14,11 +14,11 @@ import { canUserFulfillRole } from '../config/eventRoleMapping.js';
 import { joinEvent, markEventAbsence, toggleEventComposition } from '../services/eventService.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getEvent } from '../services/eventManager.js';
-import { getBotVariables } from '../utils/botVariables.js';
-import { addManualParticipant, changeParticipantRole } from '../services/participantManager.js';
+import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
+import { addManualParticipant, changeParticipantRole, removeParticipantFromEvent } from '../services/participantManager.js';
 import { EVENT_CONFIG, isValidEventType, getEventConfig, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
-import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection } from '../utils/pendingActions.js';
+import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection, setRemoveSelection, getRemoveSelection, clearRemoveSelection } from '../utils/pendingActions.js';
 import { removeEventFromCache, addEventToCache } from '../utils/eventCache.js';
 import { cancelScheduledReminder, rescheduleReminder, deleteReminderMessage } from '../utils/eventReminders.js';
 import { parseDateTimeSpain, formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
@@ -44,7 +44,7 @@ export const handleEventButton = async (interaction) => {
 
   // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
   // porque showModal debe ser la primera respuesta de la interacción
-  if (['event_manual_add', 'event_manual_move', 'event_edit', 'event_toggle_composition'].includes(customId)) {
+  if (['event_manual_add', 'event_manual_move', 'event_manual_remove', 'event_edit', 'event_toggle_composition'].includes(customId)) {
     try {
       // Para event_edit se necesita el evento completo (con created_by) para permisos
       let eventData = null;
@@ -109,8 +109,10 @@ export const handleEventButton = async (interaction) => {
 
         if (customId === 'event_manual_add') {
           await handleManualAddButton(interaction, eventData);
-        } else {
+        } else if (customId === 'event_manual_move') {
           await handleManualMoveButton(interaction, eventData);
+        } else {
+          await handleManualRemoveButton(interaction, eventData);
         }
       }
     } catch (err) {
@@ -495,9 +497,8 @@ async function handleToggleCompositionButton(interaction, event) {
  * Comprobar si el miembro puede gestionar participantes manualmente
  */
 function userCanManageManually(member) {
-  const botVars = getBotVariables();
-  const adminRoleId = botVars.ROLE_ADMIN;
-  const liderGrupoRoleId = botVars.ROLE_LIDER_GRUPO;
+  const adminRoleId = getBotVariable('ROLE_ADMIN');
+  const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
 
   if (!adminRoleId) return false;
 
@@ -512,9 +513,8 @@ function userCanManageManually(member) {
  * admin, lidergrupo, o el creador del evento
  */
 function userCanManageEvent(member, event) {
-  const botVars = getBotVariables();
-  const adminRoleId = botVars.ROLE_ADMIN;
-  const liderGrupoRoleId = botVars.ROLE_LIDER_GRUPO;
+  const adminRoleId = getBotVariable('ROLE_ADMIN');
+  const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
 
   if (adminRoleId && member.roles.cache.has(adminRoleId)) return true;
   if (liderGrupoRoleId && member.roles.cache.has(liderGrupoRoleId)) return true;
@@ -640,6 +640,88 @@ async function handleManualMoveButton(interaction, eventData) {
 
   } catch (err) {
     console.error('❌ Error en handleManualMoveButton:', err);
+    try {
+      if (!interaction.replied) {
+        await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+      }
+    } catch {}
+  }
+}
+
+/**
+ * Manejar botón "Eliminar"
+ * Muestra un mensaje efímero con 1 select (participante) y un botón Confirmar.
+ * Funciona para cualquier estado (ACTIVE, RESERVE, ABSENCE) para permitir
+ * a Admin/Líder limpiar la lista por completo.
+ */
+async function handleManualRemoveButton(interaction, eventData) {
+  try {
+    // Obtener participantes en cualquier estado (incluido ABSENCE para
+    // permitir limpieza completa de la lista)
+    const res = await query(`
+      SELECT ep.id, ep.assigned_role, ep.state, u.nickname
+      FROM event_participants ep
+      LEFT JOIN users u ON u.discord_id = ep.discord_id
+      WHERE ep.event_id = $1
+      ORDER BY
+        CASE ep.state
+          WHEN 'ACTIVE' THEN 1
+          WHEN 'RESERVE' THEN 2
+          WHEN 'ABSENCE' THEN 3
+        END,
+        ep.joined_at ASC
+    `, [eventData.id]);
+
+    if (res.rowCount === 0) {
+      return await interaction.reply({
+        content: '❌ No hay participantes en este evento.',
+        ephemeral: true
+      });
+    }
+
+    const participants = res.rows;
+
+    // Discord select: max 25 opciones
+    if (participants.length > 25) {
+      return await interaction.reply({
+        content: '❌ Demasiados participantes (>25), no se puede mostrar el selector.',
+        ephemeral: true
+      });
+    }
+
+    const stateLabel = { ACTIVE: 'Activo', RESERVE: 'Reserva', ABSENCE: 'Ausencia' };
+
+    const participantSelect = new StringSelectMenuBuilder()
+      .setCustomId(`event_remove_select_participant:${eventData.id}`)
+      .setPlaceholder('Selecciona participante a eliminar')
+      .setRequired(true)
+      .addOptions(
+        participants.map(p => {
+          const roleSuffix = p.assigned_role ? ` · ${p.assigned_role.toUpperCase()}` : '';
+          return {
+            label: truncateForModal(`${p.nickname || 'Sin nombre'}${roleSuffix}`, 100),
+            value: String(p.id),
+            description: `Estado: ${stateLabel[p.state] || p.state}`
+          };
+        })
+      );
+
+    const confirmButton = new ButtonBuilder()
+      .setCustomId(`event_remove_confirm:${eventData.id}`)
+      .setLabel('🗑️ Eliminar')
+      .setStyle(ButtonStyle.Danger);
+
+    const row1 = new ActionRowBuilder().addComponents(participantSelect);
+    const row2 = new ActionRowBuilder().addComponents(confirmButton);
+
+    await interaction.reply({
+      content: `🗑️ **Eliminar participante** en **${eventData.title}**\nSelecciona el participante y pulsa Eliminar.`,
+      components: [row1, row2],
+      ephemeral: true
+    });
+
+  } catch (err) {
+    console.error('❌ Error en handleManualRemoveButton:', err);
     try {
       if (!interaction.replied) {
         await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
@@ -1040,6 +1122,93 @@ export const handleMoveConfirm = async (interaction) => {
 
   } catch (err) {
     console.error('❌ Error en handleMoveConfirm:', err);
+    try {
+      await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+    } catch {}
+  }
+};
+
+/**
+ * Manejar selección de participante en el flujo de "Eliminar".
+ * Solo almacena en memoria; el procesamiento ocurre al pulsar Eliminar.
+ * customId: event_remove_select_participant:<eventId>
+ */
+export const handleRemoveSelect = async (interaction) => {
+  if (!interaction.customId.startsWith('event_remove_select_participant:')) return;
+
+  if (!userCanManageManually(interaction.member)) {
+    return await interaction.reply({ content: '❌ Sin permisos.', ephemeral: true });
+  }
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) return;
+
+  setRemoveSelection(interaction.user.id, eventId, { participantId: interaction.values[0] });
+
+  // Acknowledge sin modificar el mensaje
+  try {
+    await interaction.deferUpdate();
+  } catch {}
+};
+
+/**
+ * Manejar botón "Eliminar" del flujo de "Eliminar".
+ * Lee el participantId almacenado en memoria y lo borra.
+ * customId: event_remove_confirm:<eventId>
+ */
+export const handleRemoveConfirm = async (interaction) => {
+  if (!interaction.customId.startsWith('event_remove_confirm:')) return;
+
+  if (!userCanManageManually(interaction.member)) {
+    return await safeReplySelect(interaction, '❌ Solo Admin y Líder de Grupo pueden usar este botón.');
+  }
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const selection = getRemoveSelection(interaction.user.id, eventId);
+
+  if (!selection || !selection.participantId) {
+    return await safeReplySelect(interaction, '❌ Debes seleccionar un participante antes de eliminar.');
+  }
+
+  const participantId = parseInt(selection.participantId, 10);
+  if (isNaN(participantId)) {
+    return await safeReplySelect(interaction, '❌ Participante inválido.');
+  }
+
+  try {
+    await interaction.deferUpdate();
+
+    const result = await removeParticipantFromEvent({
+      eventId,
+      participantId,
+      client: interaction.client,
+      onUpdateEmbed: createOrUpdateEventEmbed
+    });
+
+    clearRemoveSelection(interaction.user.id, eventId);
+
+    const removedName = result.removed?.discord_id
+      ? (result.removed.discord_id.startsWith('manual_')
+          ? `**${result.removed.discord_id}**`
+          : `<@${result.removed.discord_id}>`)
+      : 'Participante';
+
+    let content = `✅ ${removedName} eliminado del evento.`;
+    if (result.promoted) {
+      const promotedName = result.promoted.discord_id.startsWith('manual_')
+        ? `**${result.promoted.discord_id}**`
+        : `<@${result.promoted.discord_id}>`;
+      content += `\n⬆️ ${promotedName} promovido a **ACTIVE** (${(result.promoted.assigned_role || '').toUpperCase()}) al liberarse el slot.`;
+    }
+
+    await interaction.editReply({ content, components: [] });
+
+  } catch (err) {
+    console.error('❌ Error en handleRemoveConfirm:', err);
     try {
       await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
     } catch {}

@@ -33,16 +33,19 @@ export const addVariable = {
         });
       }
 
+      // Guardar SIEMPRE en mayúsculas para mantener consistencia con
+      // el resto del código (que accede a botVars.ROLE_*, ROLE_LIDER_GRUPO, etc.)
+      // y con getBotVariable() que hace lookup case-insensitive.
       await query(`
         INSERT INTO bot_variables (key, value) VALUES ($1, $2)
         ON CONFLICT (key) DO UPDATE SET value = EXCLUDED.value
-      `, [key, value]);
+      `, [k, value]);
 
       await loadBotVariables();
       eventBus.emit('botVariableChanged', { key, value });
 
       await interaction.reply({
-        content: `✅ Variable **${key}** guardada con valor **${value}**`,
+        content: `✅ Variable **${k}** guardada con valor **${value}**`,
         ephemeral: true
       });
     } catch (err) {

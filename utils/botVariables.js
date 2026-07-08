@@ -18,3 +18,26 @@ export const loadBotVariables = async () => {
 
 // Función para acceder al objeto ya cargado
 export const getBotVariables = () => botVariables;
+
+/**
+ * Obtener una variable del bot por clave (lookup case-insensitive).
+ *
+ * Por convención las claves se guardan en MAYÚSCULAS (ROLE_ADMIN,
+ * ROLE_LIDER_GRUPO, etc.), pero si por algún motivo se guardaron en
+ * otro case (ej: un /add_variable antiguo guardó "role_lider_grupo"),
+ * esta función sigue resolviendo el valor correcto en lugar de devolver
+ * undefined silenciosamente.
+ *
+ * @param {string} key - Clave a buscar (case-insensitive)
+ * @returns {string|undefined} El valor o undefined si no existe
+ */
+export const getBotVariable = (key) => {
+  if (!key) return undefined;
+  if (botVariables[key] !== undefined) return botVariables[key];
+
+  const upper = String(key).toUpperCase();
+  for (const k of Object.keys(botVariables)) {
+    if (k.toUpperCase() === upper) return botVariables[k];
+  }
+  return undefined;
+};

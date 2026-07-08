@@ -5,6 +5,7 @@
  * Se pierde al reiniciar el bot, pero es aceptable para flujos cortos.
  *
  * Estructura: key = `${userId}:${eventId}`, value = { name?, participantId?, newRole?, timestamp }
+ * Las keys reales usan prefijos (add:, move:, remove:) para separar flujos.
  */
 
 const pendingActions = new Map();
@@ -52,6 +53,28 @@ export const getMoveSelection = (userId, eventId) => {
 
 export const clearMoveSelection = (userId, eventId) => {
   pendingActions.delete(`move:${userId}:${eventId}`);
+};
+
+// ==================== REMOVE (1 select + confirm) ====================
+
+export const setRemoveSelection = (userId, eventId, partial) => {
+  const key = `remove:${userId}:${eventId}`;
+  const current = pendingActions.get(key) || {};
+  pendingActions.set(key, { ...current, ...partial, timestamp: Date.now() });
+};
+
+export const getRemoveSelection = (userId, eventId) => {
+  const entry = pendingActions.get(`remove:${userId}:${eventId}`);
+  if (!entry) return null;
+  if (isExpired(entry)) {
+    pendingActions.delete(`remove:${userId}:${eventId}`);
+    return null;
+  }
+  return entry;
+};
+
+export const clearRemoveSelection = (userId, eventId) => {
+  pendingActions.delete(`remove:${userId}:${eventId}`);
 };
 
 // ==================== LIMPIEZA ====================

@@ -8,6 +8,7 @@ import {
   updateParticipantRole,
   updateParticipantState,
   reactivateParticipant,
+  deleteParticipant,
   countActiveParticipantsByRole,
   countActiveParticipants
 } from '../db/eventRepository.js';
@@ -218,4 +219,56 @@ export async function changeParticipantRole({ eventId, participantId, newRole, c
   }
 
   return { swapped: true, participantId, newRole, displacedId };
+}
+
+/**
+ * Eliminar un participante de un evento.
+ *
+ * Si estaba ACTIVE, se promueve al primer RESERVE de su mismo rol (si existe
+ * y cumple la capability). Para eventos sin roles (Raid) o participantes
+ * RESERVE/ABSENCE, no se promueve a nadie y solo se refresca el embed.
+ *
+ * @param {object} params
+ * @param {number} params.eventId
+ * @param {number} params.participantId
+ * @param {object} [params.client] - Cliente Discord (necesario para actualizar embed)
+ * @param {function} [params.onUpdateEmbed] - Callback (client, eventId) para refrescar embed
+ * @returns {object} { removed, promoted }
+ */
+export async function removeParticipantFromEvent({ eventId, participantId, client = null, onUpdateEmbed = null }) {
+  const event = await getEvent(eventId);
+
+  if (event.status !== 'OPEN') {
+    throw new Error('❌ Este evento ya ha finalizado.');
+  }
+
+  // Verificar que el participante existe en este evento
+  const existing = await query(`
+    SELECT id, discord_id, state, assigned_role
+    FROM event_participants
+    WHERE id = $1 AND event_id = $2
+  `, [participantId, eventId]);
+
+  if (existing.rowCount === 0) {
+    throw new Error('❌ Participante no encontrado.');
+  }
+
+  const part = existing.rows[0];
+
+  // Borrar participante
+  await deleteParticipant(participantId);
+  console.log(`🗑️ Participante ${participantId} (${part.discord_id}) eliminado del evento ${eventId}`);
+
+  // Si era ACTIVE y tenía rol asignado, promover al primer RESERVE del mismo rol.
+  // promoteReserveToActive ya encola la actualización del embed vía onUpdateEmbed.
+  let promoted = null;
+  if (part.state === PARTICIPANT_STATES.ACTIVE && part.assigned_role) {
+    promoted = await promoteReserveToActive(eventId, part.assigned_role, client, onUpdateEmbed);
+  } else if (onUpdateEmbed && client) {
+    // RESERVE / ABSENCE: no hay hueco que llenar, pero el embed debe
+    // refrescarse para que el participante eliminado desaparezca de la lista.
+    onUpdateEmbed(client, eventId);
+  }
+
+  return { removed: part, promoted };
 }

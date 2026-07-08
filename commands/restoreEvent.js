@@ -4,7 +4,7 @@ import { query } from '../db/database.js';
 import { getEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { EVENT_CONFIG, EVENT_STATES } from '../config/eventConfig.js';
-import { getBotVariables } from '../utils/botVariables.js';
+import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
 import { addEventToCache, getOpenEventsFromCache, getRecentFinishedEventsFromCache } from '../utils/eventCache.js';
 import { restoreReminders } from '../utils/eventReminders.js';
 
@@ -39,8 +39,8 @@ export const restoreEvent = {
   execute: async (interaction) => {
     try {
       const botVars = getBotVariables();
-      const adminRoleId = botVars.ROLE_ADMIN;
-      const liderGrupoRoleId = botVars.ROLE_LIDER_GRUPO;
+      const adminRoleId = getBotVariable('ROLE_ADMIN');
+      const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
 
       const hasAdmin = interaction.member.roles.cache.has(adminRoleId);
       const hasLider = liderGrupoRoleId && interaction.member.roles.cache.has(liderGrupoRoleId);

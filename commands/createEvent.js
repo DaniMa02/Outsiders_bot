@@ -3,7 +3,7 @@ import { SlashCommandBuilder } from 'discord.js';
 import { createEvent as createEventInDB } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { isValidEventType, getEventConfig } from '../config/eventConfig.js';
-import { getBotVariables } from '../utils/botVariables.js';
+import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
 import { parseDateTimeSpain } from '../utils/dateTime.js';
 
 /**
@@ -54,8 +54,8 @@ export const createEvent = {
     try {
       // 🔹 Validar permisos
       const botVars = getBotVariables();
-      const adminRoleId = botVars.ROLE_ADMIN;
-      const liderGrupoRoleId = botVars.ROLE_LIDER_GRUPO;
+      const adminRoleId = getBotVariable('ROLE_ADMIN');
+      const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
 
       const hasAdminPermission = interaction.member.roles.cache.has(adminRoleId);
       const hasLiderPermission = liderGrupoRoleId && interaction.member.roles.cache.has(liderGrupoRoleId);
