@@ -57,8 +57,20 @@ export const createEvent = {
       const adminRoleId = getBotVariable('ROLE_ADMIN');
       const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
 
+      const userRoleIds = [...interaction.member.roles.cache.keys()];
       const hasAdminPermission = interaction.member.roles.cache.has(adminRoleId);
       const hasLiderPermission = liderGrupoRoleId && interaction.member.roles.cache.has(liderGrupoRoleId);
+
+      console.log('🔍 [createEvent] Permission check:', {
+        userId: interaction.user.id,
+        userTag: interaction.user.tag,
+        adminRoleId,
+        liderGrupoRoleId,
+        hasAdminPermission,
+        hasLiderPermission,
+        userRoleIds,
+        botVarsKeys: Object.keys(botVars)
+      });
 
       if (!hasAdminPermission && !hasLiderPermission) {
         return await interaction.reply({
