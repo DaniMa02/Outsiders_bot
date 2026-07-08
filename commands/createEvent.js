@@ -18,6 +18,7 @@ export const createEvent = {
   data: new SlashCommandBuilder()
     .setName('create_event')
     .setDescription('Crear un nuevo evento (Hell, Hardcore, Raid)')
+    .setDefaultMemberPermissions(null)
     .addStringOption(option =>
       option
         .setName('tipo')

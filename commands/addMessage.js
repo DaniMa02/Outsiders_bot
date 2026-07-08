@@ -20,6 +20,7 @@ export const addMessage = {
   data: new SlashCommandBuilder()
     .setName('add_message')
     .setDescription('Añade o actualiza un mensaje programado')
+    .setDefaultMemberPermissions(null)
     .addIntegerOption(o =>
       o.setName('id')
         .setDescription('ID del mensaje a actualizar (vacío = nuevo)')

@@ -4,7 +4,8 @@ import { query } from '../db/database.js';
 export const listVariable = {
   data: new SlashCommandBuilder()
     .setName('list_variables')
-    .setDescription('📋 Muestra todas las variables almacenadas del bot.'),
+    .setDescription('📋 Muestra todas las variables almacenadas del bot.')
+    .setDefaultMemberPermissions(null),
 
   async execute(interaction) {
     await interaction.deferReply({ flags: 64 });

@@ -7,6 +7,7 @@ export const deleteVariable = {
   data: new SlashCommandBuilder()
     .setName('delete_variable')
     .setDescription('🗑️ Elimina una variable almacenada del bot.')
+    .setDefaultMemberPermissions(null)
     .addStringOption(o =>
       o.setName('key')
         .setDescription('Nombre (clave) de la variable a eliminar.')

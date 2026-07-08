@@ -4,7 +4,8 @@ import { query } from '../db/database.js';
 export const listMessage = {
   data: new SlashCommandBuilder()
     .setName('list_messages')
-    .setDescription('📜 Muestra todos los mensajes programados.'),
+    .setDescription('📜 Muestra todos los mensajes programados.')
+    .setDefaultMemberPermissions(null),
 
   async execute(interaction) {
     await interaction.deferReply({ flags: 64 });

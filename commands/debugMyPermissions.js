@@ -14,7 +14,8 @@ import { getBotVariable } from '../utils/botVariables.js';
 export const debugMyPermissions = {
   data: new SlashCommandBuilder()
     .setName('debug_my_permissions')
-    .setDescription('Muestra tus roles y los IDs configurados en el bot (debug).'),
+    .setDescription('Muestra tus roles y los IDs configurados en el bot (debug).')
+    .setDefaultMemberPermissions(null),
 
   execute: async function(interaction) {
     await interaction.deferReply({ ephemeral: true });

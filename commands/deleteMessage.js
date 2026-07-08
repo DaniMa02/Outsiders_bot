@@ -6,6 +6,7 @@ export const deleteMessage = {
   data: new SlashCommandBuilder()
     .setName('delete_message')
     .setDescription('🗑️ Elimina un mensaje programado por su ID.')
+    .setDefaultMemberPermissions(null)
     .addIntegerOption(o =>
       o.setName('id')
         .setDescription('ID del mensaje programado a eliminar.')

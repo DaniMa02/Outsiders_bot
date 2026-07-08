@@ -28,6 +28,7 @@ export const restoreEvent = {
   data: new SlashCommandBuilder()
     .setName('restore_event')
     .setDescription('Reenvía/regenera el embed de un evento. Reactiva eventos cancelados por error.')
+    .setDefaultMemberPermissions(null)
     .addStringOption(opt =>
       opt
         .setName('evento')

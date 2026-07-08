@@ -191,16 +191,31 @@ client.once(Events.ClientReady, async () => {
 
     const newCommands = commands.map(c => c.data.toJSON());
 
-    const hasChanges =
-      existingCommands.length !== newCommands.length ||
-      existingCommands.some((cmd, i) => JSON.stringify(cmd) !== JSON.stringify(newCommands[i]));
+    // Comparar por nombre (no por índice): Discord puede devolver los
+    // comandos en otro orden al que se enviaron, lo que hacía que la
+    // detección basada en índice diese falsos positivos y, peor aún, que
+    // un default_member_permissions cacheado NO se detectase como cambio
+    // si coincidía la posición.
+    const existingByName = new Map(existingCommands.map(cmd => [cmd.name, cmd]));
+    const newByName = new Map(newCommands.map(cmd => [cmd.name, cmd]));
+
+    let hasChanges = existingByName.size !== newByName.size;
+    if (!hasChanges) {
+      for (const [name, newCmd] of newByName) {
+        const existingCmd = existingByName.get(name);
+        if (!existingCmd || JSON.stringify(existingCmd) !== JSON.stringify(newCmd)) {
+          hasChanges = true;
+          break;
+        }
+      }
+    }
 
     if (hasChanges) {
       await rest.put(
         Routes.applicationGuildCommands(client.application.id, guildId),
         { body: newCommands }
       );
-      console.log(`✅ Comandos actualizados en el servidor ${guildId}`);
+      console.log(`✅ Comandos actualizados en el servidor ${guildId} (${newCommands.length} comandos)`);
     } else {
       console.log('ℹ️ Comandos ya registrados, sin cambios.');
     }

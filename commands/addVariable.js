@@ -9,6 +9,7 @@ export const addVariable = {
   data: new SlashCommandBuilder()
     .setName('add_variable')
     .setDescription('Añadir o actualizar una variable del bot')
+    .setDefaultMemberPermissions(null)
     .addStringOption(option =>
       option.setName('key')
         .setDescription('Nombre de la variable')
