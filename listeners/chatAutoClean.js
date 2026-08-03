@@ -128,6 +128,8 @@ const scanChannelOnStartup = async (client, channelId) => {
 };
 
 export const initChatAutoClean = async (client) => {
+  console.log('⛔ Auto-clean: DESACTIVADO. No se programan borrados.');
+  return;
   refreshConfiguredChannels();
 
   if (configuredChannelIds.size === 0) {

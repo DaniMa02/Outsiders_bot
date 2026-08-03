@@ -248,7 +248,7 @@ client.once(Events.ClientReady, async () => {
   initEmbedCleanupScheduler(client);
   await checkAndFixEventStatesOnStartup(client);
   await loadScheduledReminders(client);
-  await initChatAutoClean(client);
+  // await initChatAutoClean(client); // DESACTIVADO: auto-clean de mensajes >1h en RAID/HELL/HARDCORE
 });
 
 
