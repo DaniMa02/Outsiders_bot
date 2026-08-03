@@ -14,15 +14,19 @@ import { EVENT_CONFIG } from '../config/eventConfig.js';
  * Si el bot está caído a la hora exacta del recordatorio, se enviará
  * al arrancar (con un margen de hasta 1h).
  *
- * Cada evento tiene DOS recordatorios:
+ * Cada evento tiene UN recordatorio:
  *  - 'channel' → 10 min antes: mensaje al canal del evento (tagea rol + usuarios)
- *  - 'dm'      → 15 min antes: DM individual a cada participante activo
+ *
+ * Los DMs individuales a cada participante estaban deshabilitados
+ * (ver scheduleDmReminder / sendDmReminders). Las columnas dm_send_at /
+ * dm_sent / dm_sent_at en event_reminders se mantienen en el esquema
+ * por compatibilidad, pero ya no se programan ni se usan.
  */
 
 const scheduledTimeouts = new Map(); // key: `${eventId}:${type}` → Timeout
 
 const REMINDER_OFFSET_MS = 10 * 60 * 1000;  // 10 minutos antes (recordatorio en canal)
-const DM_REMINDER_OFFSET_MS = 15 * 60 * 1000; // 15 minutos antes (DM individual)
+const DM_REMINDER_OFFSET_MS = 15 * 60 * 1000; // (DESACTIVADO) DM individual
 const PAST_DUE_GRACE_MS = 60 * 60 * 1000;   // 1 hora de gracia para recordatorios atrasados
 
 // setTimeout en Node tiene un delay máximo de 2^31-1 ms (~24.8 días).
@@ -101,9 +105,10 @@ export const scheduleEventReminder = (client, eventId, sendAt) => {
 
 /**
  * Programar el recordatorio por DM (15 min antes).
+ * DESACTIVADO: ya no se envían DMs individuales. No-op.
  */
 export const scheduleDmReminder = (client, eventId, sendAt) => {
-  return scheduleReminderInternal(client, eventId, sendAt, 'dm');
+  return;
 };
 
 /**
@@ -124,9 +129,8 @@ export const rescheduleReminder = async (client, eventId, newDatetime) => {
   // Cancelar timeouts en memoria (canal + DM)
   cancelScheduledReminder(eventId);
 
-  // Calcular nuevos send_at
+  // Calcular nuevo send_at (canal)
   const newSendAt = new Date(newDatetime.getTime() - REMINDER_OFFSET_MS);
-  const newDmSendAt = new Date(newDatetime.getTime() - DM_REMINDER_OFFSET_MS);
 
   // Verificar si existe fila en DB
   const existing = await query(
@@ -138,24 +142,22 @@ export const rescheduleReminder = async (client, eventId, newDatetime) => {
     // Resetear sent/sent_at y limpiar message_id del recordatorio anterior
     await query(
       `UPDATE event_reminders
-       SET send_at = $1, sent = FALSE, sent_at = NULL, reminder_message_id = NULL,
-           dm_send_at = $2, dm_sent = FALSE, dm_sent_at = NULL
-       WHERE event_id = $3`,
-      [newSendAt.toISOString(), newDmSendAt.toISOString(), eventId]
+       SET send_at = $1, sent = FALSE, sent_at = NULL, reminder_message_id = NULL
+       WHERE event_id = $2`,
+      [newSendAt.toISOString(), eventId]
     );
   } else {
     // Crear nueva fila
     await query(
-      'INSERT INTO event_reminders (event_id, send_at, dm_send_at) VALUES ($1, $2, $3)',
-      [newSendAt.toISOString(), newDmSendAt.toISOString(), eventId]
+      'INSERT INTO event_reminders (event_id, send_at) VALUES ($1, $2)',
+      [newSendAt.toISOString(), eventId]
     );
   }
 
-  // Programar los nuevos timeouts
+  // Programar el nuevo timeout (canal). DMs desactivados.
   scheduleEventReminder(client, eventId, newSendAt);
-  scheduleDmReminder(client, eventId, newDmSendAt);
 
-  console.log(`⏰ Recordatorios reprogramados para evento ${eventId} → canal: ${newSendAt.toISOString()}, DM: ${newDmSendAt.toISOString()}`);
+  console.log(`⏰ Recordatorio (canal) reprogramado para evento ${eventId} → ${newSendAt.toISOString()}`);
 };
 
 /**
@@ -179,22 +181,16 @@ export const loadScheduledReminders = async (client) => {
       scheduleEventReminder(client, row.event_id, new Date(row.send_at));
     }
 
-    // Recordatorios por DM
-    const dmRes = await query(`
-      SELECT er.event_id, er.dm_send_at
-      FROM event_reminders er
-      JOIN events e ON e.id = er.event_id
-      WHERE er.dm_sent = FALSE
-        AND e.status = 'OPEN'
-        AND er.dm_send_at > NOW() - INTERVAL '1 hour'
-      ORDER BY er.dm_send_at ASC
+    // Recordatorios por DM: DESACTIVADOS. Se ignoran filas con dm_sent = FALSE
+    // (si las hay de eventos creados antes de esta versión) y se marcan como enviados
+    // para no acumular trabajo pendiente en BD.
+    await query(`
+      UPDATE event_reminders
+      SET dm_sent = TRUE, dm_sent_at = NOW()
+      WHERE dm_sent = FALSE
     `);
 
-    for (const row of dmRes.rows) {
-      scheduleDmReminder(client, row.event_id, new Date(row.dm_send_at));
-    }
-
-    console.log(`✅ Recordatorios cargados al arrancar: ${channelRes.rowCount} canal, ${dmRes.rowCount} DM`);
+    console.log(`✅ Recordatorios cargados al arrancar: ${channelRes.rowCount} canal (DMs desactivados)`);
   } catch (err) {
     console.error('❌ Error cargando recordatorios:', err);
   }
@@ -205,7 +201,8 @@ export const loadScheduledReminders = async (client) => {
  */
 async function sendReminderForType(client, eventId, type) {
   if (type === 'channel') return sendChannelReminder(client, eventId);
-  if (type === 'dm') return sendDmReminders(client, eventId);
+  // 'dm' desactivado: nunca se programa, pero por si quedase algo en memoria
+  // de una versión anterior, se ignora silenciosamente.
 }
 
 /**
@@ -217,12 +214,9 @@ async function markReminderSent(eventId, type) {
       'UPDATE event_reminders SET sent = TRUE, sent_at = NOW() WHERE event_id = $1 AND sent = FALSE',
       [eventId]
     );
-  } else if (type === 'dm') {
-    await query(
-      'UPDATE event_reminders SET dm_sent = TRUE, dm_sent_at = NOW() WHERE event_id = $1 AND dm_sent = FALSE',
-      [eventId]
-    );
   }
+  // 'dm' desactivado: no se hace nada. Las filas pendientes se marcan en lote
+  // al arrancar el bot (ver loadScheduledReminders).
 }
 
 /**
@@ -286,77 +280,11 @@ async function sendChannelReminder(client, eventId) {
 
 /**
  * Enviar el recordatorio por DM a cada participante activo (15 min antes).
- * Si un usuario tiene los DMs cerrados, se omite silenciosamente (con warn).
+ * DESACTIVADO: ya no se envían DMs individuales. No-op por si quedase
+ * algún timeout en memoria de una versión anterior.
  */
 async function sendDmReminders(client, eventId) {
-  // 1️⃣ Obtener evento
-  const eventRes = await query(
-    'SELECT * FROM events WHERE id = $1',
-    [eventId]
-  );
-
-  if (eventRes.rowCount === 0) {
-    await markReminderSent(eventId, 'dm');
-    return;
-  }
-
-  const event = eventRes.rows[0];
-
-  // 2️⃣ Si el evento ya no está OPEN, no enviar
-  if (event.status !== 'OPEN') {
-    await markReminderSent(eventId, 'dm');
-    return;
-  }
-
-  // 3️⃣ Obtener participantes activos (excluyendo entradas manuales sin discord_id real)
-  const partRes = await query(`
-    SELECT u.discord_id, u.nickname
-    FROM event_participants ep
-    JOIN users u ON u.discord_id = ep.discord_id
-    WHERE ep.event_id = $1 AND ep.state = 'ACTIVE'
-  `, [eventId]);
-
-  const config = EVENT_CONFIG[event.type];
-  const eventTime = new Date(event.datetime).toLocaleString('es-ES', {
-    weekday: 'long',
-    day: '2-digit',
-    month: '2-digit',
-    hour: '2-digit',
-    minute: '2-digit',
-    timeZone: 'Europe/Madrid'
-  });
-
-  let sent = 0;
-  let failed = 0;
-
-  // 4️⃣ Enviar DM a cada participante
-  for (const p of partRes.rows) {
-    // Saltar entradas manuales (discord_id tipo 'manual_xxx')
-    if (p.discord_id.startsWith('manual_')) continue;
-
-    try {
-      const user = await client.users.fetch(p.discord_id);
-      if (!user) continue;
-
-      const dmContent =
-        `⏰ <@${p.discord_id}> **Recordatorio: ${config?.icon || '•'} ${event.title}**\n` +
-        `Empieza en **15 minutos**.\n` +
-        `📅 ${eventTime}\n` +
-        `📍 Canal: <#${event.channel_id}>`;
-
-      await user.send({ content: dmContent });
-      sent++;
-    } catch (err) {
-      // Lo más habitual: el usuario tiene los DMs cerrados
-      failed++;
-      console.warn(`⚠️ No se pudo enviar DM a ${p.discord_id} para evento ${eventId}: ${err.message}`);
-    }
-  }
-
-  // 5️⃣ Marcar como enviado
-  await markReminderSent(eventId, 'dm');
-
-  console.log(`⏰ DMs enviados para evento ${eventId}: ${sent} ok, ${failed} fallidos (de ${partRes.rows.length} participantes)`);
+  return;
 }
 
 /**
@@ -463,27 +391,25 @@ export const restoreReminders = async (client, eventId) => {
       return;
     }
 
-    const event = eventRes.rows[0];
-    const eventDate = new Date(event.datetime);
+  const event = eventRes.rows[0];
+  const eventDate = new Date(event.datetime);
 
-    const newSendAt = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
-    const newDmSendAt = new Date(eventDate.getTime() - DM_REMINDER_OFFSET_MS);
+  const newSendAt = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
 
-    // Resetear flags en BD
-    await query(
-      `UPDATE event_reminders
-       SET send_at = $1, sent = FALSE, sent_at = NULL, reminder_message_id = NULL,
-           dm_send_at = $2, dm_sent = FALSE, dm_sent_at = NULL
-       WHERE event_id = $3`,
-      [newSendAt.toISOString(), newDmSendAt.toISOString(), eventId]
-    );
+  // Resetear flags en BD (canal; los DM quedan marcados para no enviarse)
+  await query(
+    `UPDATE event_reminders
+     SET send_at = $1, sent = FALSE, sent_at = NULL, reminder_message_id = NULL,
+         dm_sent = TRUE, dm_sent_at = NOW()
+     WHERE event_id = $2`,
+    [newSendAt.toISOString(), eventId]
+  );
 
-    // Cancelar timeouts anteriores (por si quedaron en memoria) y programar nuevos
-    cancelScheduledReminder(eventId);
-    scheduleEventReminder(client, eventId, newSendAt);
-    scheduleDmReminder(client, eventId, newDmSendAt);
+  // Cancelar timeouts anteriores (por si quedaron en memoria) y programar nuevo (canal)
+  cancelScheduledReminder(eventId);
+  scheduleEventReminder(client, eventId, newSendAt);
 
-    console.log(`♻️ Recordatorios restaurados para evento ${eventId} → canal: ${newSendAt.toISOString()}, DM: ${newDmSendAt.toISOString()}`);
+  console.log(`♻️ Recordatorio (canal) restaurado para evento ${eventId} → ${newSendAt.toISOString()}`);
   } catch (err) {
     console.error(`❌ Error restaurando recordatorios de evento ${eventId}:`, err);
   }

@@ -11,9 +11,7 @@ import { EVENT_CONFIG, EVENT_STATES, EMBED_DELETE_DELAY_MS, isValidEventType } f
 import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
 import {
   REMINDER_OFFSET_MS,
-  DM_REMINDER_OFFSET_MS,
   scheduleEventReminder,
-  scheduleDmReminder,
   cancelScheduledReminder,
   deleteReminderMessage
 } from '../utils/eventReminders.js';
@@ -71,19 +69,17 @@ export async function createEvent({ type, title, datetime, channelId, createdBy,
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
   addEventToCache({ ...event, status: 'OPEN' });
 
-  // 7️⃣ Programar recordatorios: canal (10 min antes) + DM individual (15 min antes)
+  // 7️⃣ Programar recordatorio de canal (10 min antes). DMs individuales desactivados.
   try {
     const reminderTime = new Date(eventDate.getTime() - REMINDER_OFFSET_MS);
-    const dmReminderTime = new Date(eventDate.getTime() - DM_REMINDER_OFFSET_MS);
 
     await query(
-      'INSERT INTO event_reminders (event_id, send_at, dm_send_at) VALUES ($1, $2, $3)',
-      [event.id, reminderTime.toISOString(), dmReminderTime.toISOString()]
+      'INSERT INTO event_reminders (event_id, send_at) VALUES ($1, $2)',
+      [event.id, reminderTime.toISOString()]
     );
 
     if (client) {
       scheduleEventReminder(client, event.id, reminderTime);
-      scheduleDmReminder(client, event.id, dmReminderTime);
     }
   } catch (err) {
     console.error('⚠️ No se pudo programar recordatorio (no crítico):', err.message);
