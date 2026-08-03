@@ -126,10 +126,22 @@ function getGoatSuffix(discordId) {
 }
 
 /**
+ * Limpia un nickname guardado en BD: quita las '@' iniciales.
+ * Discord interpreta un '@' al principio como prefijo de mención y lo
+ * renderiza como enlace clickable aunque no apunte a un ID válido.
+ * Como algunos displayName de usuarios empiezan por '@' y el bot los
+ * guarda tal cual, saneamos aquí para que el embed se vea limpio.
+ */
+function cleanNickname(nickname) {
+  if (!nickname) return null;
+  return nickname.replace(/^@+/, '').trim() || null;
+}
+
+/**
  * Formatea una línea de participante: nombre + posición + 🐐 (si aplica)
  */
 function formatParticipantLine(p, position) {
-  const name = p.nickname || `<@${p.discord_id}>`;
+  const name = cleanNickname(p.nickname) || `<@${p.discord_id}>`;
   const posIcon = getPositionIcon(position);
   const goat = getGoatSuffix(p.discord_id);
   return `${name} ${posIcon}${goat}`;
@@ -198,7 +210,7 @@ function buildEmbedWithRoles(event, summary, config, positionById) {
   // Sección AUSENCIAS
   if (summary.absence.count > 0) {
     const absenceText = summary.absence.participants
-      .map(p => `• ${p.nickname || `<@${p.discord_id}>`}`)
+      .map(p => `• ${cleanNickname(p.nickname) || `<@${p.discord_id}>`}`)
       .join('\n');
 
     embed.addFields({
@@ -326,7 +338,7 @@ function buildEmbedNoRoles(event, summary, config, positionById) {
   // Sección AUSENCIAS
   if (summary.absence.count > 0) {
     const absenceText = summary.absence.participants
-      .map(p => `• ${p.nickname || `<@${p.discord_id}>`}`)
+      .map(p => `• ${cleanNickname(p.nickname) || `<@${p.discord_id}>`}`)
       .join('\n');
 
     embed.addFields({
@@ -486,5 +498,5 @@ async function getUserNickname(discordId) {
     [discordId]
   );
 
-  return res.rows[0]?.nickname || `User ${discordId.slice(-4)}`;
+  return cleanNickname(res.rows[0]?.nickname) || `User ${discordId.slice(-4)}`;
 }
