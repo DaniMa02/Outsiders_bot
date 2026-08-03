@@ -66,13 +66,26 @@ async function processQueue() {
  * @param {object} params
  * @returns {object} participante creado/actualizado
  */
-export async function joinEvent({ eventId, discordId, role = null, client, onUpdateEmbed }) {
+export async function joinEvent({ eventId, discordId, role = null, displayName = null, client, onUpdateEmbed }) {
   // 1️⃣ Obtener evento
   const event = await getEvent(eventId);
 
   // 2️⃣ Validar que evento está OPEN
   if (event.status !== 'OPEN') {
     throw new Error('❌ Este evento ya ha finalizado.');
+  }
+
+  // 2.5️⃣ Asegurar que existe la fila en `users` con el nickname actual.
+  // Si no se hace, el LEFT JOIN del embed devuelve nickname=NULL y el
+  // render cae al fallback `<@discord_id>`, que Discord muestra como
+  // mención clickeable (azul) en vez del nombre plano. Por eso ciertos
+  // usuarios aparecen como "@Nick" en los embeds.
+  if (displayName) {
+    await query(`
+      INSERT INTO users (discord_id, nickname)
+      VALUES ($1, $2)
+      ON CONFLICT (discord_id) DO UPDATE SET nickname = EXCLUDED.nickname
+    `, [discordId, displayName]);
   }
 
   // 3️⃣ Buscar participante existente

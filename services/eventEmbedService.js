@@ -33,6 +33,12 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     const allParticipants = await getAllEventParticipantsWithPosition(eventId);
     const config = EVENT_CONFIG[event.type];
 
+    // 1.5️⃣ Rellenar nicknames NULL: defensa para usuarios apuntados antes
+    // de que se arreglara la causa raíz. Si nickname es null, fetch desde
+    // Discord y, si existe, persistir en BD para no tener que volver a
+    // fetchear. Discord.js cachea users, así que el coste es despreciable.
+    await fillMissingNicknames(client, summary);
+
     // Mapa id -> posición (1-based, según joined_at ASC)
     const positionById = new Map();
     for (const p of allParticipants) {
@@ -123,6 +129,55 @@ function getGoatSuffix(discordId) {
   const goatId = botVars.GOAT_USER_ID;
   if (goatId && discordId === goatId) return ' 🐐';
   return '';
+}
+
+/**
+ * Rellenar nicknames NULL con el displayName actual de Discord.
+ *
+ * Causa: `addParticipant` solo hace INSERT en `event_participants`, no
+ * crea/actualiza la fila en `users`. Para usuarios apuntados antes de
+ * que joinEvent recibiera `displayName`, su `users.nickname` es NULL y
+ * el render cae al fallback `<@discord_id>` (mención clickeable).
+ *
+ * Aquí, para cada participante con nickname null, hacemos fetch del user
+ * de Discord (cacheado), rellenamos en memoria para el render de esta
+ * pasada y, si obtuvimos un nombre, lo persistimos para no repetir.
+ */
+async function fillMissingNicknames(client, summary) {
+  const groups = [summary.active.participants, summary.reserve.participants, summary.absence.participants];
+  const toPersist = [];
+
+  for (const list of groups) {
+    for (const p of list) {
+      if (p.nickname) continue;
+      try {
+        const user = await client.users.fetch(p.discord_id);
+        if (!user) continue;
+        const name = user.displayName || user.username;
+        if (!name) continue;
+        p.nickname = name;
+        toPersist.push({ discordId: p.discord_id, nickname: name });
+      } catch {
+        // Si no se puede fetchear (bot no compartido, user borrado, etc.)
+        // dejamos el nickname como null y el render usará la mención.
+      }
+    }
+  }
+
+  if (toPersist.length > 0) {
+    try {
+      for (const { discordId, nickname } of toPersist) {
+        await query(`
+          INSERT INTO users (discord_id, nickname)
+          VALUES ($1, $2)
+          ON CONFLICT (discord_id) DO UPDATE SET nickname = EXCLUDED.nickname
+        `, [discordId, nickname]);
+      }
+      console.log(`🧹 Rellenados ${toPersist.length} nickname(s) NULL desde Discord`);
+    } catch (err) {
+      console.warn('⚠️ No se pudieron persistir los nicknames rellenados:', err.message);
+    }
+  }
 }
 
 /**

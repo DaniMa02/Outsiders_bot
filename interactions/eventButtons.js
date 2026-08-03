@@ -217,11 +217,12 @@ async function handleRoleButton(interaction, eventData, roleRequired, user, memb
 
     // 2️⃣ Apuntar a evento con rol
     const event = await getEvent(eventData.id);
-    
+
     const result = await joinEvent({
       eventId: eventData.id,
       discordId: user.id,
       role: roleRequired,
+      displayName: member.displayName,
       client: interaction.client,
       onUpdateEmbed: createOrUpdateEventEmbed
     });
@@ -252,6 +253,7 @@ async function handleJoinButton(interaction, eventData, user, member) {
         eventId: eventData.id,
         discordId: user.id,
         role: null,
+        displayName: member.displayName,
         client: interaction.client,
         onUpdateEmbed: createOrUpdateEventEmbed
       });
