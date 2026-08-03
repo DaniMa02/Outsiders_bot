@@ -4,11 +4,11 @@ import { getBotVariables } from '../utils/botVariables.js';
 import { eventBus } from '../utils/eventBus.js';
 
 /**
- * Auto-limpieza de chat: borra mensajes con >1h de antigüedad,
+ * Auto-limpieza de chat: borra mensajes con >24h (1 día) de antigüedad,
  * EXCEPTO los embeds enviados por el propio bot (embeds de eventos).
  *
  * El borrado es POR MENSAJE: cada mensaje programa su propio setTimeout
- * para (createdTimestamp + 1h). No es un cron global.
+ * para (createdTimestamp + 24h). No es un cron global.
  *
  * Configuración: lee estas variables del bot y aplica auto-clean a sus canales.
  *   - RAID_CHANNEL_ID
@@ -19,10 +19,10 @@ import { eventBus } from '../utils/eventBus.js';
  *
  * Persistencia: si el bot se reinicia, al arrancar se escanean los
  * últimos 100 mensajes de cada canal configurado y se reprograma el
- * borrado de los que aún no han cumplido la 1h.
+ * borrado de los que aún no han cumplido las 24h.
  */
 
-const ONE_HOUR_MS = 60 * 60 * 1000;
+const ONE_DAY_MS = 24 * 60 * 60 * 1000;
 const VAR_KEYS = ['RAID_CHANNEL_ID', 'HELL_CHANNEL_ID', 'HARDCORE_CHANNEL_ID'];
 const SCAN_LIMIT = 100;
 
@@ -67,7 +67,7 @@ const scheduleDeletion = (message) => {
   }
 
   const elapsed = Date.now() - message.createdTimestamp;
-  const delay = Math.max(0, ONE_HOUR_MS - elapsed);
+  const delay = Math.max(0, ONE_DAY_MS - elapsed);
 
   const timer = setTimeout(async () => {
     scheduledTimers.delete(message.id);
@@ -110,7 +110,7 @@ const scanChannelOnStartup = async (client, channelId) => {
       if (msg.pinned) continue;
 
       const age = now - msg.createdTimestamp;
-      if (age >= ONE_HOUR_MS) {
+      if (age >= ONE_DAY_MS) {
         await tryDelete(msg);
         immediate++;
       } else {
@@ -128,8 +128,6 @@ const scanChannelOnStartup = async (client, channelId) => {
 };
 
 export const initChatAutoClean = async (client) => {
-  console.log('⛔ Auto-clean: DESACTIVADO. No se programan borrados.');
-  return;
   refreshConfiguredChannels();
 
   if (configuredChannelIds.size === 0) {
