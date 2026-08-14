@@ -74,7 +74,7 @@ export const EVENT_CONFIG = {
     label: 'Raid',
     channel_var: 'RAID_CHANNEL_ID',
     notify_role_var: 'RAID_NOTIFY_ROLE_ID',
-    max_players: 8, // igual que hardcore; el 9º y siguientes van a RESERVE
+    max_players: null,
     roles_required: false,
     max_roles: {},
     button_style: ButtonStyle.Primary,

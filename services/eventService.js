@@ -166,6 +166,23 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
   const maxPlayers = getEventMaxPlayers(event);
   const currentCount = await countActiveParticipants(eventId);
 
+  // RAID: no hay reservas. Cada 8 usuarios forman un nuevo grupo.
+  // El estado queda siempre en ACTIVE para todos los participantes no absent.
+  if (event.type === 'raid') {
+    const result = await upsertParticipant({
+      eventId,
+      discordId,
+      state: PARTICIPANT_STATES.ACTIVE,
+      assignedRole: role,
+      existingId: existing?.id,
+      client,
+      onUpdateEmbed
+    });
+
+    await normalizeRaidGroupStates(eventId);
+    return result;
+  }
+
   if (maxPlayers !== null && currentCount >= maxPlayers) {
     // Evento lleno → como RESERVE
     const result = await upsertParticipant({
@@ -223,6 +240,39 @@ async function upsertParticipant({ eventId, discordId, state, assignedRole, exis
   return participant;
 }
 
+/**
+ * Ajusta los estados ACTIVE/RESERVE de un evento RAID según el orden de
+ * llegada por grupos de 8, de tal forma que el grupo 1 es siempre el
+ * principal, el grupo 2 pasa a ocupar el hueco si alguien del 1 cae a
+ * RESERVE, y si el de grupo 1 vuelve, la posición original se restaura.
+ */
+export async function normalizeRaidGroupStates(eventId) {
+  const event = await getEvent(eventId);
+  if (!event || event.type !== 'raid') {
+    return [];
+  }
+
+  const res = await query(`
+    SELECT id, state
+    FROM event_participants
+    WHERE event_id = $1 AND state != $2
+    ORDER BY joined_at ASC
+  `, [eventId, PARTICIPANT_STATES.ABSENCE]);
+
+  const participants = res.rows;
+
+  for (const participant of participants) {
+    if (participant.state !== PARTICIPANT_STATES.ACTIVE) {
+      await query(
+        'UPDATE event_participants SET state = $1 WHERE id = $2',
+        [PARTICIPANT_STATES.ACTIVE, participant.id]
+      );
+    }
+  }
+
+  return participants;
+}
+
 // ==================== MARCAR ABSENCE ====================
 
 /**
@@ -251,7 +301,17 @@ export async function markEventAbsence({ eventId, participantId, discordId, clie
 
   console.log(`❌ Usuario ${discordId} marcado como ABSENCE en evento ${eventId}`);
 
+  const event = await getEvent(eventId);
+
   // 4️⃣ Si era ACTIVE, buscar RESERVE que cumpla rol para subirlo
+  if (event?.type === 'raid') {
+    await normalizeRaidGroupStates(eventId);
+    if (onUpdateEmbed) {
+      queueEventUpdate(client, eventId, onUpdateEmbed);
+    }
+    return;
+  }
+
   if (part.state === PARTICIPANT_STATES.ACTIVE && part.assigned_role) {
     await promoteReserveToActive(eventId, part.assigned_role, client, onUpdateEmbed);
   } else {

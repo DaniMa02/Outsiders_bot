@@ -101,6 +101,52 @@ export async function deleteEvent(eventId) {
   await query(`DELETE FROM events WHERE id = $1`, [eventId]);
 }
 
+/**
+ * Garantizar la tabla de grupos RAID cancelados.
+ */
+export async function ensureRaidGroupCancellationTable() {
+  await query(`
+    CREATE TABLE IF NOT EXISTS event_raid_group_cancellations (
+      id            SERIAL PRIMARY KEY,
+      event_id      INTEGER NOT NULL REFERENCES events(id) ON DELETE CASCADE,
+      group_number  INTEGER NOT NULL,
+      cancelled_at  TIMESTAMP NOT NULL DEFAULT NOW(),
+      UNIQUE (event_id, group_number)
+    )
+  `);
+}
+
+/**
+ * Obtener grupos RAID cancelados para un evento.
+ */
+export async function getCancelledRaidGroups(eventId) {
+  await ensureRaidGroupCancellationTable();
+  const res = await query(
+    `SELECT group_number
+     FROM event_raid_group_cancellations
+     WHERE event_id = $1
+     ORDER BY group_number ASC`,
+    [eventId]
+  );
+  return res.rows.map(row => row.group_number);
+}
+
+/**
+ * Marcar un grupo RAID como cancelado.
+ */
+export async function cancelRaidGroup(eventId, groupNumber) {
+  await ensureRaidGroupCancellationTable();
+  const res = await query(
+    `INSERT INTO event_raid_group_cancellations (event_id, group_number)
+     VALUES ($1, $2)
+     ON CONFLICT (event_id, group_number) DO NOTHING
+     RETURNING *`,
+    [eventId, groupNumber]
+  );
+
+  return res.rows[0] || null;
+}
+
 // ==================== PARTICIPANTES ====================
 
 /**
