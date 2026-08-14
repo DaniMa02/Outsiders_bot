@@ -7,6 +7,7 @@ import { deleteMessage } from './commands/deleteMessage.js';
 import { deleteVariable } from './commands/deleteVariable.js';
 import { createEvent } from './commands/createEvent.js';
 import { restoreEvent } from './commands/restoreEvent.js';
+import { sendTestEvent } from './commands/sendTestEvent.js';
 import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
@@ -170,6 +171,7 @@ const commands = [
   // Events
   createEvent,
   restoreEvent,
+  sendTestEvent,
 
   // Debug
   debugMyPermissions
