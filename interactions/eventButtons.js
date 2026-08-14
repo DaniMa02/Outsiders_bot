@@ -16,6 +16,7 @@ import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getEvent } from '../services/eventManager.js';
 import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole, removeParticipantFromEvent } from '../services/participantManager.js';
+import { cancelRaidGroup } from '../db/eventRepository.js';
 import { EVENT_CONFIG, isValidEventType, getEventConfig, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection, setRemoveSelection, getRemoveSelection, clearRemoveSelection } from '../utils/pendingActions.js';
@@ -141,7 +142,9 @@ export const handleEventButton = async (interaction) => {
       try {
         // 1️⃣ Obtener evento desde message_id
         const eventButtonIds = ['event_join', 'event_absence', 'event_cancel'];
-        const isEventButton = eventButtonIds.includes(customId) || customId.startsWith('event_role_');
+        const isEventButton = eventButtonIds.includes(customId)
+          || customId.startsWith('event_role_')
+          || customId.startsWith('event_cancel_group_');
         let eventData = null;
 
         if (isEventButton) {
@@ -181,7 +184,14 @@ export const handleEventButton = async (interaction) => {
           return;
         }
 
-        // 6️⃣ Botón desconocido
+        // 6️⃣ BOTÓN CANCELAR GRUPO RAID
+        if (customId.startsWith('event_cancel_group_')) {
+          const groupNumber = Number(customId.replace('event_cancel_group_', ''));
+          await handleCancelRaidGroupButton(interaction, eventData, groupNumber, user);
+          return;
+        }
+
+        // 7️⃣ Botón desconocido
         return safeReply(interaction, '❓ Botón no reconocido');
 
       } catch (err) {
@@ -433,6 +443,70 @@ async function handleCancelButton(interaction, eventData, user) {
 
   } catch (err) {
     console.error('❌ Error en handleCancelButton:', err);
+    return safeReply(interaction, `❌ ${err.message}`);
+  }
+}
+
+async function handleCancelRaidGroupButton(interaction, eventData, groupNumber, user) {
+  try {
+    const event = await getEvent(eventData.id);
+    if (!event) {
+      return safeReply(interaction, '❌ Evento no encontrado.');
+    }
+
+    if (event.type !== 'raid') {
+      return safeReply(interaction, '❌ Este botón solo aplica a eventos RAID.');
+    }
+
+    if (!userCanManageEvent(interaction.member, event)) {
+      return safeReply(interaction, '❌ Solo Admin, Líder de Grupo o el creador pueden cancelar un grupo.');
+    }
+
+    if (!Number.isInteger(groupNumber) || groupNumber < 1) {
+      return safeReply(interaction, '❌ Número de grupo inválido.');
+    }
+
+    const res = await query(`
+      SELECT id
+      FROM event_participants
+      WHERE event_id = $1 AND state != 'ABSENCE'
+      ORDER BY joined_at ASC
+    `, [eventData.id]);
+
+    const start = (groupNumber - 1) * 8;
+    const end = start + 8;
+    const groupParticipants = res.rows.slice(start, end);
+
+    if (groupParticipants.length === 0) {
+      return safeReply(interaction, `❌ El grupo ${groupNumber} no existe en este evento.`);
+    }
+
+    for (const participant of groupParticipants) {
+      await query('DELETE FROM event_participants WHERE id = $1', [participant.id]);
+    }
+
+    await cancelRaidGroup(eventData.id, groupNumber);
+    await createOrUpdateEventEmbed(interaction.client, eventData.id);
+
+    const config = EVENT_CONFIG[event.type];
+    const botVars = getBotVariables();
+    const roleId = config?.notify_role_var ? botVars[config.notify_role_var] : null;
+    const cancelContent = roleId
+      ? `❌ **Grupo ${groupNumber} cancelado** en **${config?.icon || '•'} ${event.title}**\n<@&${roleId}>`
+      : `❌ **Grupo ${groupNumber} cancelado** en **${config?.icon || '•'} ${event.title}**`;
+
+    try {
+      const channel = await interaction.client.channels.fetch(event.channel_id);
+      if (channel) {
+        await channel.send({ content: cancelContent });
+      }
+    } catch (err) {
+      console.warn(`⚠️ No se pudo enviar mensaje de cancelación del grupo ${groupNumber}:`, err.message);
+    }
+
+    return safeReply(interaction, `✅ Grupo ${groupNumber} cancelado para **${event.title}**.`);
+  } catch (err) {
+    console.error('❌ Error en handleCancelRaidGroupButton:', err);
     return safeReply(interaction, `❌ ${err.message}`);
   }
 }

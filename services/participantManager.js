@@ -2,7 +2,7 @@
 import { query } from '../db/database.js';
 import { getEvent } from './eventManager.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent } from '../config/eventConfig.js';
-import { promoteReserveToActive } from './eventService.js';
+import { promoteReserveToActive, normalizeRaidGroupStates } from './eventService.js';
 import {
   addParticipant,
   updateParticipantRole,
@@ -258,6 +258,14 @@ export async function removeParticipantFromEvent({ eventId, participantId, clien
   // Borrar participante
   await deleteParticipant(participantId);
   console.log(`🗑️ Participante ${participantId} (${part.discord_id}) eliminado del evento ${eventId}`);
+
+  if (event.type === 'raid') {
+    await normalizeRaidGroupStates(eventId);
+    if (onUpdateEmbed && client) {
+      onUpdateEmbed(client, eventId);
+    }
+    return { removed: part, promoted: null };
+  }
 
   // Si era ACTIVE y tenía rol asignado, promover al primer RESERVE del mismo rol.
   // promoteReserveToActive ya encola la actualización del embed vía onUpdateEmbed.

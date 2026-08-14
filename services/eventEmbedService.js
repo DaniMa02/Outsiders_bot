@@ -8,6 +8,7 @@ import {
 import { query } from '../db/database.js';
 import { getEvent, formatEventInfo } from './eventManager.js';
 import { getEventParticipantsSummary, getAllEventParticipantsWithPosition } from './eventService.js';
+import { getCancelledRaidGroups } from '../db/eventRepository.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent, getCompositionLabel, getToggleCompositionLabel } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { getBotVariables } from '../utils/botVariables.js';
@@ -31,6 +32,7 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     const event = await getEvent(eventId);
     const summary = await getEventParticipantsSummary(eventId);
     const allParticipants = await getAllEventParticipantsWithPosition(eventId);
+    const cancelledGroups = event.type === 'raid' ? await getCancelledRaidGroups(eventId) : [];
     const config = EVENT_CONFIG[event.type];
 
     // 1.5️⃣ Rellenar nicknames NULL: defensa para usuarios apuntados antes
@@ -50,11 +52,11 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     if (config.roles_required) {
       embed = buildEmbedWithRoles(event, summary, config, positionById);
     } else {
-      embed = buildEmbedNoRoles(event, summary, config, positionById);
+      embed = buildEmbedNoRoles(event, summary, config, positionById, allParticipants, cancelledGroups);
     }
 
     // 3️⃣ Construir botones
-    const buttonRows = buildEventButtons(event, config);
+    const buttonRows = buildEventButtons(event, config, allParticipants, cancelledGroups);
 
     // 4️⃣ Si el evento tiene composición alternativa, añadirla al footer
     const compLabel = getCompositionLabel(event);
@@ -325,7 +327,7 @@ function buildReserveLinesWithRoles(reserveSummary, positionById) {
 /**
  * Construir embed para evento sin roles (Raid)
  */
-function buildEmbedNoRoles(event, summary, config, positionById) {
+function buildEmbedNoRoles(event, summary, config, positionById, allParticipants = [], cancelledGroups = []) {
   const eventTime = new Date(event.datetime).toLocaleString('es-ES', {
     weekday: 'long',
     year: 'numeric',
@@ -342,40 +344,85 @@ function buildEmbedNoRoles(event, summary, config, positionById) {
     .setColor(config.color);
 
   const maxPlayers = config.max_players;
-  const activeCount = summary.active.count;
 
-  // Sección PARTICIPANTES
-  if (activeCount > 0) {
-    const lines = summary.active.participants.map(p => {
-      const position = positionById.get(p.id) || '?';
-      return formatParticipantLine(p, position);
-    });
+  if (event.type === 'raid') {
+    const nonAbsence = (allParticipants || []).filter(p => p.state !== 'ABSENCE');
+    const groups = [];
 
-    embed.addFields({
-      name: `👥 PARTICIPANTES (${activeCount}${maxPlayers ? `/${maxPlayers}` : ''})`,
-      value: lines.join('\n'),
-      inline: false
-    });
+    for (let i = 0; i < nonAbsence.length; i += 8) {
+      groups.push(nonAbsence.slice(i, i + 8));
+    }
+
+    const cancelledSet = new Set((cancelledGroups || []).filter(n => Number.isInteger(n) && n > 0));
+
+    if (groups.length === 0 && cancelledSet.size === 0) {
+      embed.addFields({
+        name: `👥 GRUPOS (0)`,
+        value: '_Sin participantes_',
+        inline: false
+      });
+    } else {
+      for (let i = 0; i < groups.length; i++) {
+        const group = groups[i];
+        const groupNumber = i + 1;
+        const lines = group.map(p => {
+          const position = positionById.get(p.id) || '?';
+          return formatParticipantLine(p, position);
+        });
+
+        embed.addFields({
+          name: cancelledSet.has(groupNumber)
+            ? `👥 GRUPO ${groupNumber} ❌ CANCELADO`
+            : `👥 GRUPO ${groupNumber} (${group.length}/8)`,
+          value: cancelledSet.has(groupNumber) ? '_Grupo cancelado_' : lines.join('\n'),
+          inline: true
+        });
+      }
+
+      const existingRendered = new Set(groups.map((_, idx) => idx + 1));
+      for (const groupNumber of [...cancelledSet].sort((a, b) => a - b)) {
+        if (existingRendered.has(groupNumber)) continue;
+        embed.addFields({
+          name: `👥 GRUPO ${groupNumber} ❌ CANCELADO`,
+          value: '_Grupo cancelado_',
+          inline: true
+        });
+      }
+    }
   } else {
-    embed.addFields({
-      name: `👥 PARTICIPANTES (0${maxPlayers ? `/${maxPlayers}` : ''})`,
-      value: '_Sin participantes_',
-      inline: false
-    });
-  }
+    const activeCount = summary.active.count;
 
-  // Sección RESERVAS
-  if (summary.reserve.count > 0) {
-    const lines = summary.reserve.participants.map(p => {
-      const position = positionById.get(p.id) || '?';
-      return formatParticipantLine(p, position);
-    });
+    if (activeCount > 0) {
+      const lines = summary.active.participants.map(p => {
+        const position = positionById.get(p.id) || '?';
+        return formatParticipantLine(p, position);
+      });
 
-    embed.addFields({
-      name: `📋 RESERVAS (${summary.reserve.count})`,
-      value: lines.join('\n'),
-      inline: false
-    });
+      embed.addFields({
+        name: `👥 PARTICIPANTES (${activeCount}${maxPlayers ? `/${maxPlayers}` : ''})`,
+        value: lines.join('\n'),
+        inline: false
+      });
+    } else {
+      embed.addFields({
+        name: `👥 PARTICIPANTES (0${maxPlayers ? `/${maxPlayers}` : ''})`,
+        value: '_Sin participantes_',
+        inline: false
+      });
+    }
+
+    if (summary.reserve.count > 0) {
+      const lines = summary.reserve.participants.map(p => {
+        const position = positionById.get(p.id) || '?';
+        return formatParticipantLine(p, position);
+      });
+
+      embed.addFields({
+        name: `📋 RESERVAS (${summary.reserve.count})`,
+        value: lines.join('\n'),
+        inline: false
+      });
+    }
   }
 
   // Sección AUSENCIAS
@@ -403,7 +450,7 @@ function buildEmbedNoRoles(event, summary, config, positionById) {
 /**
  * Construir filas de botones según tipo de evento
  */
-function buildEventButtons(event, config) {
+function buildEventButtons(event, config, allParticipants = [], cancelledGroups = []) {
   const rows = [];
 
   // Si evento está FINISHED, mostrar solo info sin botones
@@ -445,6 +492,30 @@ function buildEventButtons(event, config) {
         .setStyle(ButtonStyle.Danger)
     );
     rows.push(joinAbsenceRow);
+
+    const raidGroups = (allParticipants || []).filter(p => p.state !== 'ABSENCE');
+    const groupButtons = [];
+    const cancelledSet = new Set((cancelledGroups || []).filter(n => Number.isInteger(n) && n > 0));
+
+    for (let i = 0; i < raidGroups.length; i += 8) {
+      const groupIndex = Math.floor(i / 8) + 1;
+      if (cancelledSet.has(groupIndex)) {
+        continue;
+      }
+
+      groupButtons.push(
+        new ButtonBuilder()
+          .setCustomId(`event_cancel_group_${groupIndex}`)
+          .setLabel(`❌ Cancelar grupo ${groupIndex}`)
+          .setStyle(ButtonStyle.Secondary)
+      );
+    }
+
+    for (let i = 0; i < groupButtons.length; i += 5) {
+      rows.push(
+        new ActionRowBuilder().addComponents(...groupButtons.slice(i, i + 5))
+      );
+    }
   }
 
   // Gestión manual (solo usable por Admin/Líder de Grupo, validado en el handler)
