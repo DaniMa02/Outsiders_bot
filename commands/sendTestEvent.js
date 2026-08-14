@@ -36,6 +36,12 @@ export const sendTestEvent = {
         .setMinLength(3)
         .setMaxLength(100)
     )
+    .addChannelOption(option =>
+      option
+        .setName('canal')
+        .setDescription('Canal donde enviar el embed de prueba')
+        .setRequired(true)
+    )
     .addStringOption(option =>
       option
         .setName('fecha')
@@ -47,12 +53,6 @@ export const sendTestEvent = {
         .setName('hora')
         .setDescription('Hora del evento (HH:MM)')
         .setRequired(false)
-    )
-    .addChannelOption(option =>
-      option
-        .setName('canal')
-        .setDescription('Canal donde enviar el embed de prueba')
-        .setRequired(true)
     ),
 
   execute: async function(interaction) {
