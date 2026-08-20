@@ -24,11 +24,37 @@ export async function notifyPromotionToActive(client, discordId, event) {
     const fecha = formatFechaMadrid(event.datetime);
     const hora = formatHoraMadrid(event.datetime);
 
-    await user.send({
-      content: `¡Buenas! Has subido desde RESERVA al grupo principal para el evento **${event.title}** (${fecha} ${hora}). ¡Suerte!`
-    });
+    // Formato inspirado en el reminder antiguo (15min) adaptado a promoción
+    const config = event?.type ? (event.type === 'hell' ? { icon: '🔥', label: 'Hell' } : event.type === 'hardcore' ? { icon: '⚔️', label: 'Hardcore' } : { icon: '•', label: event.type }) : { icon: '•', label: '' };
+
+    const dmLines = [];
+    dmLines.push(`⏰ **Has subido al grupo principal**`);
+    dmLines.push(`${config.icon} **${event.title}**`);
+    dmLines.push(`Empieza en **${fecha} ${hora}**`);
+
+    // Intentar añadir canal legible si existe
+    if (event.channel_id) {
+      dmLines.push(`📍 Canal: <#${event.channel_id}>`);
+    }
+
+    const dmContent = dmLines.join('\n');
+
+    await user.send({ content: dmContent });
 
     console.log(`✉️ Notificación DM enviada a ${discordId} por promoción en evento ${event.id}`);
+
+    // Además, publicar aviso persistente en el canal del evento para dejar constancia
+    try {
+      if (event.channel_id) {
+        const channel = await client.channels.fetch(event.channel_id);
+        if (channel) {
+          const channelContent = `⬆️ <@${discordId}> ha subido desde **RESERVA** al grupo principal para **${event.title}** (${fecha} ${hora}).`;
+          await channel.send({ content: channelContent });
+        }
+      }
+    } catch (err) {
+      console.warn(`⚠️ No se pudo enviar aviso al canal del evento ${event.id}:`, err && err.message ? err.message : err);
+    }
   } catch (err) {
     console.warn(`⚠️ No se pudo enviar DM a ${discordId}: ${err && err.message ? err.message : err}`);
   }

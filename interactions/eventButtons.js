@@ -1281,7 +1281,13 @@ export const handleRemoveConfirm = async (interaction) => {
       content += `\n⬆️ ${promotedName} promovido a **ACTIVE** (${(result.promoted.assigned_role || '').toUpperCase()}) al liberarse el slot.`;
     }
 
-    await interaction.editReply({ content, components: [] });
+    // Responder a la interacción con el contenido resumido (ephemeral)
+    try {
+      await interaction.editReply({ content, components: [] });
+    } catch (err) {
+      // Si el editReply falla, no es crítico
+      console.warn('⚠️ No se pudo editar la respuesta efímera tras eliminar participante:', err.message);
+    }
 
   } catch (err) {
     console.error('❌ Error en handleRemoveConfirm:', err);
