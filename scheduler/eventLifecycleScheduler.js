@@ -141,6 +141,26 @@ async function cleanupOldEmbeds(client) {
         // Limpiar message_id (tanto en éxito como si el canal ya no existe)
         await query('UPDATE events SET message_id = NULL WHERE id = $1', [event.id]);
 
+        // Borrar mensajes de notificación asociados en event_notifications (si existen)
+        try {
+          const notifRes = await query('SELECT message_id FROM event_notifications WHERE event_id = $1', [event.id]);
+          for (const row of notifRes.rows) {
+            try {
+              const nmsg = await channel.messages.fetch(row.message_id);
+              await nmsg.delete();
+              console.log(`🗑️ Mensaje de notificación eliminado: ${row.message_id} (evento ${event.id})`);
+            } catch (nerr) {
+              if (nerr.code !== 10008) {
+                console.warn(`⚠️ No se pudo borrar mensaje de notificación ${row.message_id}:`, nerr.message);
+              }
+            }
+          }
+          // Limpiar registros de event_notifications
+          await query('DELETE FROM event_notifications WHERE event_id = $1', [event.id]);
+        } catch (notifErr) {
+          console.warn(`⚠️ Error limpiando event_notifications para evento ${event.id}:`, notifErr.message);
+        }
+
         // También borrar el mensaje de recordatorio (10 min antes) si existe
         // Lo hacemos en su propio try para que un fallo no impida limpiar el otro
         try {
