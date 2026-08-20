@@ -1,5 +1,6 @@
 // services/notificationService.js
 import { formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
+import { query } from '../db/database.js';
 
 /**
  * Enviar DM al usuario notificando que ha subido desde RESERVE a ACTIVE.
@@ -49,7 +50,14 @@ export async function notifyPromotionToActive(client, discordId, event) {
         const channel = await client.channels.fetch(event.channel_id);
         if (channel) {
           const channelContent = `⬆️ <@${discordId}> ha subido desde **RESERVA** al grupo principal para **${event.title}** (${fecha} ${hora}).`;
-          await channel.send({ content: channelContent });
+        const sent = await channel.send({ content: channelContent });
+        try {
+          if (sent && sent.id) {
+            await query('INSERT INTO event_notifications (event_id, message_id) VALUES ($1, $2)', [event.id, sent.id]);
+          }
+        } catch (dbErr) {
+          console.warn(`⚠️ No se pudo registrar event_notifications para evento ${event.id}:`, dbErr.message);
+        }
         }
       }
     } catch (err) {
