@@ -379,6 +379,20 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
 
   if (!promoted) {
     console.log(`ℹ️ No hay RESERVE disponible para cumplir rol ${roleNeeded} en evento ${eventId}`);
+  } else {
+    // Si se promovió a alguien, delegar la notificación DM a notificationService
+    try {
+      if (client && !promoted.discord_id.startsWith('manual_')) {
+        const event = await getEvent(eventId);
+        if (event && (event.type === 'hell' || event.type === 'hardcore')) {
+          // Importar dinámicamente para evitar ciclos en require/import si hace falta
+          const { notifyPromotionToActive } = await import('./notificationService.js');
+          await notifyPromotionToActive(client, promoted.discord_id, event);
+        }
+      }
+    } catch (err) {
+      console.error(`❌ Error enviando notificación DM tras promoción:`, err);
+    }
   }
 
   // 5️⃣ Actualizar embed (una sola vez, al final)
