@@ -9,6 +9,7 @@ import { createEvent } from './commands/createEvent.js';
 import { restoreEvent } from './commands/restoreEvent.js';
 import { sendTestEvent } from './commands/sendTestEvent.js';
 import { manageScheduledEvent } from './commands/manageScheduledEvent.js';
+import { listScheduledEvents } from './commands/listScheduledEvents.js';
 import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
@@ -261,6 +262,7 @@ const commands = [
   restoreEvent,
   sendTestEvent,
   manageScheduledEvent,
+  listScheduledEvents,
 
   // Debug
   debugMyPermissions
