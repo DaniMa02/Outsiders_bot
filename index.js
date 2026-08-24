@@ -8,6 +8,7 @@ import { deleteVariable } from './commands/deleteVariable.js';
 import { createEvent } from './commands/createEvent.js';
 import { restoreEvent } from './commands/restoreEvent.js';
 import { sendTestEvent } from './commands/sendTestEvent.js';
+import { manageScheduledEvent } from './commands/manageScheduledEvent.js';
 import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
@@ -65,6 +66,9 @@ https.get("https://discord.com/api/v10/gateway", res => {
 
 // ---------------- Cache ----------------
 let scheduledMessages = [];
+let scheduledMessageJobs = [];
+let scheduledEventTemplates = [];
+let scheduledEventJobs = [];
 
 const loadScheduledMessages = async () => {
   try {
@@ -73,6 +77,16 @@ const loadScheduledMessages = async () => {
     console.log('🕐 Mensajes programados cargados:', scheduledMessages.length);
   } catch (err) {
     console.error('❌ Error cargando mensajes programados:', err);
+  }
+};
+
+const loadScheduledEventTemplates = async () => {
+  try {
+    const res = await query('SELECT * FROM scheduled_event_templates WHERE active = TRUE ORDER BY created_at ASC');
+    scheduledEventTemplates = res.rows;
+    console.log('🗓️ Eventos programados cargados:', scheduledEventTemplates.length);
+  } catch (err) {
+    console.error('❌ Error cargando eventos programados:', err);
   }
 };
 
@@ -131,7 +145,8 @@ const scheduleAllMessages = () => {
     return;
   }
 
-  cron.getTasks().forEach(task => task.stop());
+  scheduledMessageJobs.forEach(job => job.stop());
+  scheduledMessageJobs = [];
 
   scheduledMessages.forEach(msg => {
     if (!msg.send_time || !msg.days_of_week) return;
@@ -148,11 +163,84 @@ const scheduleAllMessages = () => {
 
     const cronPattern = `${minute} ${hour} * * ${cronDays}`;
 
-    cron.schedule(
+    const job = cron.schedule(
       cronPattern,
       () => sendMessage(msg.channel_id, msg.content, botVars),
       { timezone: 'Europe/Madrid' }
     );
+    scheduledMessageJobs.push(job);
+  });
+};
+
+const runScheduledEventTemplate = async (client, template) => {
+  try {
+    const eventTime = template.event_time || '22:00';
+    const [eventHourStr, eventMinuteStr] = eventTime.split(':');
+    const eventHour = Number(eventHourStr) || 22;
+    const eventMinute = Number(eventMinuteStr) || 0;
+
+    const nextDatetime = new Date();
+    nextDatetime.setDate(nextDatetime.getDate() + 1);
+    nextDatetime.setHours(eventHour, eventMinute, 0, 0);
+
+    const alreadyExists = await query(
+      `SELECT id FROM events
+       WHERE type = $1
+         AND title = $2
+         AND channel_id = $3
+         AND date(datetime) = date($4)
+         AND status = 'OPEN'`,
+      [template.type, template.title, template.channel_id, nextDatetime.toISOString()]
+    );
+
+    if (alreadyExists.rowCount > 0) {
+      console.log(`ℹ️ Evento programado ya existente para ${template.type} - ${template.title} (${nextDatetime.toISOString()})`);
+      return;
+    }
+
+    const { createEvent: createEventInDB } = await import('./services/eventManager.js');
+    const { createOrUpdateEventEmbed } = await import('./services/eventEmbedService.js');
+
+    const event = await createEventInDB({
+      type: template.type,
+      title: template.title,
+      datetime: nextDatetime.toISOString(),
+      channelId: template.channel_id,
+      createdBy: template.created_by || 'SYSTEM_SCHEDULED_EVENT',
+      composition: template.composition ?? 0
+    });
+
+    await createOrUpdateEventEmbed(client, event.id);
+    console.log(`✅ Evento programado enviado: ${template.type.toUpperCase()} - ${template.title} (${nextDatetime.toISOString()})`);
+  } catch (err) {
+    console.error('❌ Error ejecutando evento programado:', err);
+  }
+};
+
+const scheduleScheduledEvents = () => {
+  scheduledEventJobs.forEach(job => job.stop());
+  scheduledEventJobs = [];
+
+  scheduledEventTemplates.forEach(template => {
+    if (!template.active) return;
+    if (!template.send_time) return;
+
+    const [hourStr, minuteStr] = (template.send_time || '22:00').split(':');
+    const hour = Number(hourStr) || 22;
+    const minute = Number(minuteStr) || 0;
+    const cronDays = (template.days_of_week || '0,1,2,3,4,5,6')
+      .split(',')
+      .map(d => d.trim())
+      .filter(Boolean)
+      .join(',');
+
+    const cronPattern = `${minute} ${hour} * * ${cronDays}`;
+    const job = cron.schedule(
+      cronPattern,
+      () => runScheduledEventTemplate(client, template),
+      { timezone: 'Europe/Madrid' }
+    );
+    scheduledEventJobs.push(job);
   });
 };
 
@@ -172,6 +260,7 @@ const commands = [
   createEvent,
   restoreEvent,
   sendTestEvent,
+  manageScheduledEvent,
 
   // Debug
   debugMyPermissions
@@ -230,7 +319,9 @@ client.once(Events.ClientReady, async () => {
   const botVars = getBotVariables();
   await loadEventsCache();
   await loadScheduledMessages();
+  await loadScheduledEventTemplates();
   scheduleAllMessages();
+  scheduleScheduledEvents();
 
   // ==================== ONE-TIME SYNC ====================
   // Si RUN_SYNC=1 en .env, ejecuta la sincronización inicial de
@@ -368,7 +459,7 @@ app.get('/', (_, res) => res.send('Bot activo ✅'));
 app.listen(PORT, () => console.log(`🌐 Web escuchando en ${PORT}`));
 
 // ---------------- Exports ----------------
-export { loadScheduledMessages, scheduleAllMessages };
+export { loadScheduledMessages, loadScheduledEventTemplates, scheduleAllMessages, scheduleScheduledEvents };
 
 // ---------------- Login ----------------
 console.log("TOKEN:", process.env.TOKEN);

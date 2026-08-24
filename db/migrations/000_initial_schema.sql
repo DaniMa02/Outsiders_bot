@@ -62,7 +62,30 @@ CREATE TABLE IF NOT EXISTS events (
 );
 
 -- ============================================================
--- 4. EVENT_PARTICIPANTS
+-- 4. SCHEDULED_EVENT_TEMPLATES
+-- Plantillas de eventos automáticos diarios. Cada plantilla genera
+-- un evento real en la BD a la hora programada usando el mismo
+-- flujo que /create_event.
+-- ============================================================
+CREATE TABLE IF NOT EXISTS scheduled_event_templates (
+  id           SERIAL PRIMARY KEY,
+  type         TEXT NOT NULL,
+  title        TEXT NOT NULL,
+  channel_id   TEXT NOT NULL,
+  send_time    TEXT NOT NULL DEFAULT '22:00',
+  days_of_week TEXT NOT NULL DEFAULT '0,1,2,3,4,5,6',
+  active       BOOLEAN NOT NULL DEFAULT TRUE,
+  composition  SMALLINT DEFAULT 0,
+  created_by   TEXT NOT NULL,
+  created_at   TIMESTAMP NOT NULL DEFAULT NOW(),
+  updated_at   TIMESTAMP NOT NULL DEFAULT NOW()
+);
+
+CREATE INDEX IF NOT EXISTS idx_scheduled_event_templates_active_time
+  ON scheduled_event_templates(active, send_time, days_of_week);
+
+-- ============================================================
+-- 5. EVENT_PARTICIPANTS
 -- - Usuarios (o entradas manuales) apuntados a un evento.
 -- - discord_id: ID real o 'manual_<eventId>_<sanitizedName>'
 -- - state: 'ACTIVE' | 'RESERVE' | 'ABSENCE'
