@@ -258,6 +258,7 @@ const scheduleScheduledEvents = () => {
       .join(',');
 
     const cronPattern = `${minute} ${hour} * * ${cronDays}`;
+    console.log(`🕐 Programando evento recurrente: ${template.type} | ${template.title} | trigger=${template.send_time} | cron=${cronPattern} | tz=Europe/Madrid`);
     const job = cron.schedule(
       cronPattern,
       () => runScheduledEventTemplate(client, template),
