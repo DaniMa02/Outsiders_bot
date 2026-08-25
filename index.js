@@ -34,6 +34,7 @@ import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
 import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
 import { loadEventsCache } from './utils/eventCache.js';
 import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
+import { isMadridDST } from './utils/dateTime.js';
 
 // ==================== SCHEDULER ====================
 import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
@@ -173,16 +174,37 @@ const scheduleAllMessages = () => {
   });
 };
 
+const buildMadridTimestampForNextDayEvent = (eventTime) => {
+  const [eventHourStr, eventMinuteStr] = (eventTime || '22:00').split(':');
+  const eventHour = Number(eventHourStr) || 22;
+  const eventMinute = Number(eventMinuteStr) || 0;
+
+  const now = new Date();
+  const targetDateUtc = new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    eventHour,
+    eventMinute,
+    0
+  ));
+
+  const offsetHours = isMadridDST(targetDateUtc) ? 2 : 1;
+
+  return new Date(Date.UTC(
+    now.getUTCFullYear(),
+    now.getUTCMonth(),
+    now.getUTCDate() + 1,
+    eventHour - offsetHours,
+    eventMinute,
+    0
+  ));
+};
+
 const runScheduledEventTemplate = async (client, template) => {
   try {
     const eventTime = template.event_time || '22:00';
-    const [eventHourStr, eventMinuteStr] = eventTime.split(':');
-    const eventHour = Number(eventHourStr) || 22;
-    const eventMinute = Number(eventMinuteStr) || 0;
-
-    const nextDatetime = new Date();
-    nextDatetime.setDate(nextDatetime.getDate() + 1);
-    nextDatetime.setHours(eventHour, eventMinute, 0, 0);
+    const nextDatetime = buildMadridTimestampForNextDayEvent(eventTime);
 
     const alreadyExists = await query(
       `SELECT id FROM events
