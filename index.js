@@ -138,6 +138,11 @@ const sendMessage = async (channelId, content, botVars) => {
 };
 
 
+const parseClockPart = (value, fallback) => {
+  const numericValue = Number(value);
+  return Number.isNaN(numericValue) ? fallback : numericValue;
+};
+
 // ---------------- Scheduler mensajes ----------------
 const scheduleAllMessages = () => {
   const botVars = getBotVariables();
@@ -154,8 +159,8 @@ const scheduleAllMessages = () => {
     if (!msg.send_time || !msg.days_of_week) return;
 
     const [hourStr, minuteStr] = msg.send_time.split(':');
-    const hour = parseInt(hourStr);
-    const minute = parseInt(minuteStr);
+    const hour = parseClockPart(hourStr, 22);
+    const minute = parseClockPart(minuteStr, 0);
 
     const cronDays = msg.days_of_week
       .split(',')
@@ -176,8 +181,8 @@ const scheduleAllMessages = () => {
 
 const buildMadridTimestampForNextDayEvent = (eventTime) => {
   const [eventHourStr, eventMinuteStr] = (eventTime || '22:00').split(':');
-  const eventHour = Number(eventHourStr) || 22;
-  const eventMinute = Number(eventMinuteStr) || 0;
+  const eventHour = parseClockPart(eventHourStr, 22);
+  const eventMinute = parseClockPart(eventMinuteStr, 0);
 
   const now = new Date();
   const targetDateUtc = new Date(Date.UTC(
@@ -249,8 +254,8 @@ const scheduleScheduledEvents = () => {
     if (!template.send_time) return;
 
     const [hourStr, minuteStr] = (template.send_time || '22:00').split(':');
-    const hour = Number(hourStr) || 22;
-    const minute = Number(minuteStr) || 0;
+    const hour = parseClockPart(hourStr, 22);
+    const minute = parseClockPart(minuteStr, 0);
     const cronDays = (template.days_of_week || '0,1,2,3,4,5,6')
       .split(',')
       .map(d => d.trim())
