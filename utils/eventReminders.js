@@ -344,8 +344,17 @@ export async function deleteReminderMessage(client, eventId) {
       const channel = await client.channels.fetch(eventRes.rows[0].channel_id);
       if (channel) {
         const message = await channel.messages.fetch(messageId);
-        await message.delete();
-        console.log(`🗑️ Mensaje de recordatorio eliminado: evento ${eventId}`);
+        try {
+          const { enqueueDelete } = await import('./deleteQueue.js');
+          await enqueueDelete(() => message.delete());
+          console.log(`🗑️ Mensaje de recordatorio eliminado: evento ${eventId}`);
+        } catch (err) {
+          if (err && err.code === 10008) {
+            // Unknown Message: ya fue borrado, no es un error
+          } else {
+            console.warn(`⚠️ Error eliminando recordatorio de evento ${eventId}:`, err?.message || err);
+          }
+        }
       }
     } catch (err) {
       if (err.code === 10008) {

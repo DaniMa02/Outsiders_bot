@@ -344,6 +344,24 @@ client.once(Events.ClientReady, async () => {
     console.error('❌ Error registrando comandos:', err);
   }
 
+  // Crear tabla de logs de interacciones si no existe (útil para monitorización)
+  try {
+    await query(`
+      CREATE TABLE IF NOT EXISTS interactions_log (
+        id BIGSERIAL PRIMARY KEY,
+        ts TIMESTAMPTZ NOT NULL DEFAULT NOW(),
+        guild_id TEXT,
+        user_id TEXT,
+        interaction_type TEXT,
+        name TEXT,
+        raw JSONB
+      )
+    `);
+    console.log('✅ interactions_log table ensured');
+  } catch (err) {
+    console.warn('⚠️ No se pudo asegurar la tabla interactions_log:', err.message || err);
+  }
+
   // --- Cargar datos ---
   await loadBotVariables();
   const botVars = getBotVariables();
@@ -381,6 +399,40 @@ client.once(Events.ClientReady, async () => {
 client.on(Events.InteractionCreate, async interaction => {
   // Envolver para auto-borrar mensajes efímeros a los 10s
   const interaction$ = withEphemeralAutoDelete(interaction);
+
+  // LOG: registrar interacción en BD (fire-and-forget) para monitorización
+  (async () => {
+    try {
+      let iType = 'unknown';
+      let iName = null;
+      try {
+        if (interaction$.isChatInputCommand && interaction$.isChatInputCommand()) { iType = 'chat_input'; iName = interaction$.commandName; }
+        else if (interaction$.isAutocomplete && interaction$.isAutocomplete()) { iType = 'autocomplete'; iName = interaction$.commandName; }
+        else if (interaction$.isButton && interaction$.isButton()) { iType = 'button'; iName = interaction$.customId; }
+        else if (interaction$.isStringSelectMenu && interaction$.isStringSelectMenu()) { iType = 'select'; iName = interaction$.customId; }
+        else if (interaction$.isModalSubmit && interaction$.isModalSubmit()) { iType = 'modal'; iName = interaction$.customId; }
+        else { iType = interaction.type?.toString() || 'unknown'; }
+      } catch (e) {
+        // ignore detection errors
+      }
+
+      await query(
+        'INSERT INTO interactions_log (ts, guild_id, user_id, interaction_type, name, raw) VALUES (NOW(), $1, $2, $3, $4, $5) ',
+        [interaction$.guildId || null, interaction$.user?.id || null, iType, iName, JSON.stringify({ id: interaction$.id })]
+      );
+
+      try {
+        const { recordInteraction } = await import('./utils/interactionAggregator.js');
+        recordInteraction(iType, iName);
+      } catch (e) {
+        // ignore
+      }
+
+    } catch (err) {
+      // No bloquear la interacción por fallos en el logging
+      console.warn('⚠️ No se pudo registrar interacción en DB:', err.message || err);
+    }
+  })();
 
   try {
     // Slash commands

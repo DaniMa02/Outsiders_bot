@@ -34,20 +34,20 @@ export const EPHEMERAL_DELETE_DELAY_MS = 10000; // 10 segundos
  * - Si el mensaje ya no existe (10008) o la interacción expiró (50027), se ignora.
  * - El setTimeout se unref() para no bloquear el cierre del proceso.
  */
+import { enqueueDelete } from './deleteQueue.js';
+
 function scheduleEphemeralDeletion(interaction, message) {
   if (!message?.id) return;
-
   const messageId = message.id;
 
-  const timer = setTimeout(async () => {
-    try {
-      await interaction.webhook.deleteMessage(messageId);
-    } catch (err) {
-      // 10008 = Unknown Message (ya borrado), 50027 = Invalid Webhook Token (interacción expirada)
-      if (err.code !== 10008 && err.code !== 50027) {
-        console.warn(`⚠️ No se pudo borrar mensaje efímero ${messageId}:`, err.message);
+  const timer = setTimeout(() => {
+    // Encolar la petición de borrado vía webhook.deleteMessage usando la cola global
+    enqueueDelete(() => interaction.webhook.deleteMessage(messageId)).catch(err => {
+      // 10008 = Unknown Message, 50027 = Invalid Webhook Token
+      if (err?.code !== 10008 && err?.code !== 50027) {
+        console.warn(`⚠️ No se pudo borrar mensaje efímero ${messageId}:`, err?.message || err);
       }
-    }
+    });
   }, EPHEMERAL_DELETE_DELAY_MS);
 
   if (timer.unref) timer.unref();

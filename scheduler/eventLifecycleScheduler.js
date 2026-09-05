@@ -130,9 +130,18 @@ async function cleanupOldEmbeds(client) {
         const channel = await client.channels.fetch(event.channel_id);
         if (channel) {
           const message = await channel.messages.fetch(event.message_id);
-          await message.delete();
-          cleaned++;
-          console.log(`🗑️ Embed eliminado: evento ${event.id}`);
+          try {
+            const { enqueueDelete } = await import('../utils/deleteQueue.js');
+            await enqueueDelete(() => message.delete());
+            cleaned++;
+            console.log(`🗑️ Embed eliminado: evento ${event.id}`);
+          } catch (err) {
+            if (err && err.code === 10008) {
+              // Unknown message
+            } else {
+              console.warn(`⚠️ No se pudo eliminar embed ${event.message_id} (evento ${event.id}):`, err?.message || err);
+            }
+          }
         } else {
           // Canal borrado, nada más que hacer
           skipped++;
@@ -147,8 +156,15 @@ async function cleanupOldEmbeds(client) {
           for (const row of notifRes.rows) {
             try {
               const nmsg = await channel.messages.fetch(row.message_id);
-              await nmsg.delete();
-              console.log(`🗑️ Mensaje de notificación eliminado: ${row.message_id} (evento ${event.id})`);
+              try {
+                const { enqueueDelete } = await import('../utils/deleteQueue.js');
+                await enqueueDelete(() => nmsg.delete());
+                console.log(`🗑️ Mensaje de notificación eliminado: ${row.message_id} (evento ${event.id})`);
+              } catch (nerr) {
+                if (nerr && nerr.code !== 10008) {
+                  console.warn(`⚠️ No se pudo borrar mensaje de notificación ${row.message_id}:`, nerr?.message || nerr);
+                }
+              }
             } catch (nerr) {
               if (nerr.code !== 10008) {
                 console.warn(`⚠️ No se pudo borrar mensaje de notificación ${row.message_id}:`, nerr.message);

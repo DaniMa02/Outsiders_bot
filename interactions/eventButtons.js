@@ -405,7 +405,12 @@ async function handleCancelButton(interaction, eventData, user) {
         const channel = await interaction.client.channels.fetch(fullEvent.channel_id);
         if (channel) {
           const message = await channel.messages.fetch(fullEvent.message_id);
-          await message.delete();
+          try {
+            const { enqueueDelete } = await import('../utils/deleteQueue.js');
+            await enqueueDelete(() => message.delete());
+          } catch (err) {
+            console.warn(`⚠️ No se pudo eliminar embed del evento cancelado ${eventData.id}:`, err?.message || err);
+          }
         }
       } catch (err) {
         console.warn(`⚠️ No se pudo eliminar embed del evento cancelado ${eventData.id}:`, err.message);

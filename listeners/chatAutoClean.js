@@ -50,9 +50,17 @@ const tryDelete = async (message) => {
     const fresh = await message.channel.messages.fetch(message.id);
     if (fresh.pinned) return false;
     if (isProtectedMessage(fresh, message.client)) return false;
-    await fresh.delete();
-    console.log(`🧹 Auto-clean: borrado ${message.id} en #${message.channel.id}`);
-    return true;
+    // Encolar el borrado para evitar ráfagas
+    try {
+      const { enqueueDelete } = await import('../utils/deleteQueue.js');
+      await enqueueDelete(() => fresh.delete());
+      console.log(`🧹 Auto-clean: borrado ${message.id} en #${message.channel.id}`);
+      return true;
+    } catch (err) {
+      if (err.code === 10008) return false;
+      console.warn(`⚠️ Auto-clean: no se pudo borrar ${message.id}:`, err.message || err);
+      return false;
+    }
   } catch (err) {
     if (err.code === 10008) return false;
     console.warn(`⚠️ Auto-clean: no se pudo borrar ${message.id}:`, err.message);

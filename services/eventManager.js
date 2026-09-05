@@ -222,8 +222,13 @@ export async function deleteEvent(eventId, client) {
       const channel = await client.channels.fetch(event.channel_id);
       if (channel) {
         const message = await channel.messages.fetch(event.message_id);
-        await message.delete();
-        console.log(`🗑️ Embed eliminado del canal para evento ${eventId}`);
+        try {
+          const { enqueueDelete } = await import('../utils/deleteQueue.js');
+          await enqueueDelete(() => message.delete());
+          console.log(`🗑️ Embed eliminado del canal para evento ${eventId}`);
+        } catch (err) {
+          console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err?.message || err);
+        }
       }
     } catch (err) {
       console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err.message);
@@ -312,8 +317,13 @@ export function scheduleEmbedDeletion(eventId, channelId, messageId, client, del
       const channel = await client.channels.fetch(channelId);
       if (channel) {
         const message = await channel.messages.fetch(messageId);
-        await message.delete();
-        console.log(`🗑️ Embed eliminado automáticamente para evento ${eventId}`);
+        try {
+          const { enqueueDelete } = await import('../utils/deleteQueue.js');
+          await enqueueDelete(() => message.delete());
+          console.log(`🗑️ Embed eliminado automáticamente para evento ${eventId}`);
+        } catch (err) {
+          console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err?.message || err);
+        }
       }
     } catch (err) {
       console.warn(`⚠️ No se pudo eliminar embed de evento ${eventId}:`, err.message);
