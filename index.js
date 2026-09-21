@@ -34,6 +34,7 @@ import { createOrUpdateEventEmbed } from './services/eventEmbedService.js';
 import { loadBotVariables, getBotVariables } from './utils/botVariables.js';
 import { loadEventsCache } from './utils/eventCache.js';
 import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
+import './utils/interactionAggregator.js';
 import { isMadridDST } from './utils/dateTime.js';
 
 // ==================== SCHEDULER ====================
@@ -58,7 +59,12 @@ console.log("LOGIN START");
 
 client.login(process.env.TOKEN)
   .then(() => console.log("Login success"))
-  .catch(console.error);
+  .catch(err => console.error('❌ Discord login error:', {
+    name: err?.name,
+    code: err?.code,
+    message: err?.message,
+    stack: err?.stack
+  }));
 
 console.log("LOGIN END");
 
@@ -510,21 +516,91 @@ client.on("ready", () => {
 });
 
 client.on("disconnect", () => {
-  console.log("❌ Bot disconnected");
+  console.error("❌ Bot disconnected", {
+    pid: process.pid,
+    readyAt: client.readyAt?.toISOString?.() || null,
+    timestamp: new Date().toISOString()
+  });
 });
 
 client.on("reconnecting", () => {
-  console.log("🔄 Reconnecting...");
+  console.warn("🔄 Reconnecting...", {
+    pid: process.pid,
+    timestamp: new Date().toISOString()
+  });
 });
 
 client.on("shardDisconnect", (event, id) => {
-  console.log("Shard disconnected", id);
+  console.error("❌ Shard disconnected", {
+    pid: process.pid,
+    shardId: id,
+    closeCode: event?.code ?? null,
+    reason: event?.reason || event?.message || null,
+    wasClean: event?.wasClean ?? null,
+    timestamp: new Date().toISOString()
+  });
 });
 
-client.on("error", console.error);
+client.on("shardReconnecting", id => {
+  console.warn("🔄 Shard reconnecting", {
+    pid: process.pid,
+    shardId: id,
+    timestamp: new Date().toISOString()
+  });
+});
+
+client.on("shardReady", (id, unavailableGuilds) => {
+  console.log("✅ Shard ready", {
+    pid: process.pid,
+    shardId: id,
+    unavailableGuilds: unavailableGuilds?.size ?? 0,
+    timestamp: new Date().toISOString()
+  });
+});
+
+client.on("error", err => {
+  console.error("❌ Discord client error:", {
+    pid: process.pid,
+    name: err?.name,
+    code: err?.code,
+    message: err?.message,
+    stack: err?.stack,
+    timestamp: new Date().toISOString()
+  });
+});
 
 client.on('rateLimit', (info) => {
-  console.warn('Rate limit alcanzado:', info);
+  console.warn('⚠️ Discord REST rate limit alcanzado:', {
+    pid: process.pid,
+    timestamp: new Date().toISOString(),
+    route: info?.route,
+    method: info?.method,
+    limit: info?.limit,
+    timeToReset: info?.timeToReset,
+    retryAfter: info?.retryAfter,
+    global: info?.global,
+    majorParameter: info?.majorParameter,
+    bucket: info?.bucket
+  });
+});
+
+process.on('uncaughtException', err => {
+  console.error('❌ Uncaught exception:', {
+    pid: process.pid,
+    name: err?.name,
+    code: err?.code,
+    message: err?.message,
+    stack: err?.stack,
+    timestamp: new Date().toISOString()
+  });
+});
+
+process.on('unhandledRejection', reason => {
+  console.error('❌ Unhandled rejection:', {
+    pid: process.pid,
+    reason: reason?.stack || reason?.message || reason,
+    timestamp: new Date().toISOString()
+  });
 });
 
 // ---------------- Guild Member Update ----------------
