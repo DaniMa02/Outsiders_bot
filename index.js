@@ -156,14 +156,24 @@ const sendMessage = async (channelId, content, botVars) => {
   }
 };
 
-const createEventTypeButton = (type, channelId) => {
+const createEventTypeButton = (type) => {
   const config = getEventConfig(type);
   if (!config) return null;
 
   return new ButtonBuilder()
     .setCustomId(`event_create_form_${type}`)
-    .setLabel(`${config.icon} Crear ${config.label}`)
+    .setLabel(`${config.icon} ${config.label}`)
     .setStyle(ButtonStyle.Primary);
+};
+
+const getChannelCreateType = (channelId, botVars) => {
+  const typeByChannel = {
+    [botVars.HELL_CHANNEL_ID]: 'hell',
+    [botVars.HARDCORE_CHANNEL_ID]: 'hardcore',
+    [botVars.RAID_CHANNEL_ID]: 'raid'
+  };
+
+  return typeByChannel[channelId] || null;
 };
 
 const ensurePermanentCreateButtons = async (channelId) => {
@@ -172,34 +182,37 @@ const ensurePermanentCreateButtons = async (channelId) => {
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased?.()) return;
 
-    const eventTypes = ['hell', 'hardcore', 'raid'];
-    const rows = [];
-    for (let i = 0; i < eventTypes.length; i += 3) {
-      const chunk = eventTypes.slice(i, i + 3)
-        .map(type => createEventTypeButton(type, channelId))
-        .filter(Boolean);
-      if (chunk.length > 0) {
-        rows.push(new ActionRowBuilder().addComponents(...chunk));
-      }
-    }
+    const botVars = getBotVariables();
+    const eventType = getChannelCreateType(channelId, botVars);
+    if (!eventType) return;
 
-    if (rows.length === 0) return;
+    const button = createEventTypeButton(eventType);
+    if (!button) return;
+
+    const row = new ActionRowBuilder().addComponents(button);
 
     const existingMessages = await channel.messages.fetch({ limit: 25 });
     const existing = existingMessages.find(msg =>
       msg.author.id === client.user.id &&
-      msg.components?.some(row => row.components?.some(comp => comp.customId?.startsWith('event_create_form_')))
+      msg.components?.some(r => r.components?.some(comp => comp.customId === `event_create_form_${eventType}`))
     );
 
     if (existing) {
-      await existing.edit({ components: rows });
+      await existing.edit({ components: [row] });
+      try {
+        await existing.pin();
+      } catch (pinErr) {
+        console.warn(`⚠️ No se pudo fijar el botón de creación en ${channelId}:`, pinErr?.message || pinErr);
+      }
       return;
     }
 
-    await channel.send({
-      content: '📝 Crear evento',
-      components: rows
-    });
+    const sent = await channel.send({ components: [row] });
+    try {
+      await sent.pin();
+    } catch (pinErr) {
+      console.warn(`⚠️ No se pudo fijar el botón de creación en ${channelId}:`, pinErr?.message || pinErr);
+    }
   } catch (err) {
     console.warn('⚠️ No se pudo asegurar botón permanente de creación en el canal:', err?.message || err);
   }

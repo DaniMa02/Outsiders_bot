@@ -215,8 +215,8 @@ function getHardcoreCompositionFooterText(event) {
   const effectiveComposition = event.composition == null ? 1 : Number(event.composition);
   const compositionId = effectiveComposition === 1 ? 'B' : 'A';
   const raw = compositionId === 'B'
-    ? '5DD 1 HOLY 1 TANK 1 SECOND LURER'
-    : '4DD 1 TANK 1 HOLY 1 DEBUFFER 1 SECOND LURER';
+    ? '5 DD · 1 Holy · 1 Tank · 1 Lurer'
+    : '4 DD · 1 Tank · 1 Holy · 1 Debuffer · 1 Lurer';
 
   return raw;
 }
