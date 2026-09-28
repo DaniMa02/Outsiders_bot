@@ -56,7 +56,7 @@ export const bulkCreateEvents = {
       // - composition: solo para hardcore (0=A, 1=B). Omitir/null para valores por defecto.
       const BULK_EVENTS = [
         { type: 'hell', title: 'Hell - Plantilla A', composition: null },
-        { type: 'hardcore', title: 'Hardcore · A (4 DD)', composition: 0 },
+        { type: 'hardcore', title: 'Hardcore · B (5 DD)', composition: 1 },
         // Añadir/quitar entradas según convenga
       ];
 
@@ -85,7 +85,7 @@ export const bulkCreateEvents = {
           datetime: datetime.toISOString(),
           channelId,
           createdBy: interaction.user.id,
-          composition: item.type === 'hardcore' ? (item.composition != null ? item.composition : 0) : null
+          composition: item.type === 'hardcore' ? (item.composition != null ? item.composition : 1) : null
         });
 
         // Enviar embed al canal correspondiente

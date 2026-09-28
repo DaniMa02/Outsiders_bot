@@ -125,7 +125,7 @@ export const createEvent = {
       }
 
       // 🔹 Crear evento
-      // Para Hardcore la composición se persiste con default 0 (A).
+      // Por defecto Hardcore usa composición B (5 DD · 1 Holy · 1 Tank · 1 Lurer).
       // El admin puede cambiarla después con el botón "Cambiar composición"
       // del embed (ver handleToggleCompositionButton).
       const event = await createEventInDB({
@@ -135,7 +135,7 @@ export const createEvent = {
         channelId: channelId,
         createdBy: interaction.user.id,
         client: interaction.client,
-        composition: 0
+        composition: tipo === 'hardcore' ? 1 : null
       });
 
       // 🔹 Generar y enviar embed

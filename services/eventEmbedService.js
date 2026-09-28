@@ -60,23 +60,13 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     // 3️⃣ Construir botones
     const buttonRows = buildEventButtons(event, config, allParticipants, cancelledGroups);
 
-    // 4️⃣ Si el evento es hardcore, añadir el selector de acto al footer para votar
-    // de forma visible en el canal con reacciones y mostrar el resultado actual.
+    // 4️⃣ Si el evento es hardcore, añadir el resumen de votos al footer
+    // sin incluir ni estado ni composición, para evitar ruido visual.
     if (event.type === 'hardcore') {
       const voteSummary = await summarizeHardcoreVote(client, event);
-      const existingFooter = embed.data.footer?.text || '';
-      const statusPart = existingFooter.includes('Estado:') ? existingFooter : `Estado: ${event.status}`;
-      embed.setFooter({ text: `${voteSummary} · ${statusPart}` });
-    }
-
-    // 5️⃣ Si el evento tiene composición alternativa, añadirla al footer
-    const compLabel = getCompositionLabel(event);
-    if (compLabel) {
-      const existingFooter = embed.data.footer?.text || '';
-      const statusPart = existingFooter.includes('Estado:')
-        ? existingFooter
-        : `Estado: ${event.status}`;
-      embed.setFooter({ text: `Composición ${compLabel} · ${statusPart}` });
+      embed.setFooter({ text: voteSummary });
+    } else {
+      embed.setFooter({ text: '' });
     }
 
     // 6️⃣ Enviar o editar mensaje

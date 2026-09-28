@@ -964,7 +964,7 @@ async function handleCreateModalSubmit(interaction, type) {
       channelId,
       createdBy: interaction.user.id,
       client: interaction.client,
-      composition: 0
+      composition: type === 'hardcore' ? 1 : null
     });
 
     await createOrUpdateEventEmbed(interaction.client, event.id);

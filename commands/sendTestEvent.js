@@ -100,7 +100,7 @@ export const sendTestEvent = {
         datetime: datetime.toISOString(),
         channelId: channel.id,
         createdBy: interaction.user.id,
-        composition: tipo === 'hardcore' ? 0 : null
+        composition: tipo === 'hardcore' ? 1 : null
       });
 
       // Enviar embed al canal especificado
