@@ -372,6 +372,10 @@ async function handleCreateEventFormButton(interaction, customId) {
       return await safeReply(interaction, '❌ Tipo de evento no válido.');
     }
 
+    if (!userCanCreateEvent(interaction.member)) {
+      return await safeReply(interaction, '❌ Solo Admin y Líder de Grupo pueden crear eventos.');
+    }
+
     const config = getEventConfig(type);
     const modal = new ModalBuilder()
       .setCustomId(`event_modal_create:${type}`)
@@ -652,6 +656,15 @@ function userCanManageManually(member) {
  * Comprobar si el miembro puede editar/cancelar un evento:
  * admin, lidergrupo, o el creador del evento
  */
+function userCanCreateEvent(member) {
+  const adminRoleId = getBotVariable('ROLE_ADMIN');
+  const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
+
+  if (adminRoleId && member.roles.cache.has(adminRoleId)) return true;
+  if (liderGrupoRoleId && member.roles.cache.has(liderGrupoRoleId)) return true;
+  return false;
+}
+
 function userCanManageEvent(member, event) {
   const adminRoleId = getBotVariable('ROLE_ADMIN');
   const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');

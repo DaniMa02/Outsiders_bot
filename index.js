@@ -13,12 +13,13 @@ import { listScheduledEvents } from './commands/listScheduledEvents.js';
 import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
-import { Client, GatewayIntentBits, Events, REST, Routes } from 'discord.js';
+import { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 import express from 'express';
 import { query } from './db/database.js';
 import https from "https";
+import { getEventConfig } from './config/eventConfig.js';
 
 // ==================== INTERACCIONES ====================
 import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm } from './interactions/eventButtons.js';
@@ -90,7 +91,19 @@ const loadScheduledMessages = async () => {
 
 const loadScheduledEventTemplates = async () => {
   try {
-    const res = await query('SELECT * FROM scheduled_event_templates WHERE active = TRUE ORDER BY created_at ASC');
+    const res = await query(`
+      SELECT *
+      FROM scheduled_event_templates
+      WHERE active = TRUE
+      ORDER BY
+        CASE 
+          WHEN event_time IS NULL THEN 1
+          ELSE 0
+        END,
+        event_time ASC,
+        send_time ASC,
+        created_at ASC
+    `);
     scheduledEventTemplates = res.rows;
     console.log('🗓️ Eventos programados cargados:', scheduledEventTemplates.length);
   } catch (err) {
@@ -140,6 +153,55 @@ const sendMessage = async (channelId, content, botVars) => {
     await channel.send(finalContent);
   } catch (err) {
     console.error('❌ Error enviando mensaje:', err);
+  }
+};
+
+const createEventTypeButton = (type, channelId) => {
+  const config = getEventConfig(type);
+  if (!config) return null;
+
+  return new ButtonBuilder()
+    .setCustomId(`event_create_form_${type}`)
+    .setLabel(`${config.icon} Crear ${config.label}`)
+    .setStyle(ButtonStyle.Primary);
+};
+
+const ensurePermanentCreateButtons = async (channelId) => {
+  try {
+    if (!channelId) return;
+    const channel = await client.channels.fetch(channelId);
+    if (!channel || !channel.isTextBased?.()) return;
+
+    const eventTypes = ['hell', 'hardcore', 'raid'];
+    const rows = [];
+    for (let i = 0; i < eventTypes.length; i += 3) {
+      const chunk = eventTypes.slice(i, i + 3)
+        .map(type => createEventTypeButton(type, channelId))
+        .filter(Boolean);
+      if (chunk.length > 0) {
+        rows.push(new ActionRowBuilder().addComponents(...chunk));
+      }
+    }
+
+    if (rows.length === 0) return;
+
+    const existingMessages = await channel.messages.fetch({ limit: 25 });
+    const existing = existingMessages.find(msg =>
+      msg.author.id === client.user.id &&
+      msg.components?.some(row => row.components?.some(comp => comp.customId?.startsWith('event_create_form_')))
+    );
+
+    if (existing) {
+      await existing.edit({ components: rows });
+      return;
+    }
+
+    await channel.send({
+      content: '📝 Crear evento',
+      components: rows
+    });
+  } catch (err) {
+    console.warn('⚠️ No se pudo asegurar botón permanente de creación en el canal:', err?.message || err);
   }
 };
 
@@ -376,6 +438,11 @@ client.once(Events.ClientReady, async () => {
   await loadScheduledEventTemplates();
   scheduleAllMessages();
   scheduleScheduledEvents();
+
+  const channelIdsToSeed = [botVars.HELL_CHANNEL_ID, botVars.HARDCORE_CHANNEL_ID, botVars.RAID_CHANNEL_ID].filter(Boolean);
+  for (const channelId of channelIdsToSeed) {
+    await ensurePermanentCreateButtons(channelId);
+  }
 
   // ==================== ONE-TIME SYNC ====================
   // Si RUN_SYNC=1 en .env, ejecuta la sincronización inicial de

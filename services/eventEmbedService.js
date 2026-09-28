@@ -6,12 +6,11 @@ import {
   ButtonStyle
 } from 'discord.js';
 
-export const HARDCORE_VOTE_REACTIONS = ['5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
 import { query } from '../db/database.js';
 import { getEvent, formatEventInfo } from './eventManager.js';
 import { getEventParticipantsSummary, getAllEventParticipantsWithPosition } from './eventService.js';
 import { getCancelledRaidGroups } from '../db/eventRepository.js';
-import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent, getCompositionLabel, getToggleCompositionLabel } from '../config/eventConfig.js';
+import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent, getToggleCompositionLabel } from '../config/eventConfig.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { getBotVariables } from '../utils/botVariables.js';
 
@@ -60,11 +59,11 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     // 3️⃣ Construir botones
     const buttonRows = buildEventButtons(event, config, allParticipants, cancelledGroups);
 
-    // 4️⃣ Si el evento es hardcore, añadir el resumen de votos al footer
-    // sin incluir ni estado ni composición, para evitar ruido visual.
+    // 4️⃣ Si el evento es hardcore, se muestra solo la composición actual
+    // en formato legible (sin iconos ni texto extra ni votaciones).
     if (event.type === 'hardcore') {
-      const voteSummary = await summarizeHardcoreVote(client, event);
-      embed.setFooter({ text: voteSummary });
+      const compLabel = getHardcoreCompositionFooterText(event);
+      embed.setFooter({ text: compLabel || '5DD 1 HOLY 1 TANK 1 SECOND LURER' });
     } else {
       embed.setFooter({ text: '' });
     }
@@ -87,7 +86,6 @@ export async function createOrUpdateEventEmbed(client, eventId) {
           embeds: [embed],
           components: buttonRows
         });
-        await syncHardcoreVoteReactions(client, message, event);
         console.log(`✏️ Embed actualizado para evento ${eventId}`);
       } catch (err) {
         console.warn(`⚠️ No se pudo editar mensaje, enviando nuevo:`, err.message);
@@ -205,60 +203,22 @@ async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content 
   if (content) payload.content = content;
 
   const msg = await channel.send(payload);
-  await syncHardcoreVoteReactions(null, msg, { id: eventId, type: 'hardcore' });
 
   // Guardar message_id en BD
   await query('UPDATE events SET message_id = $1 WHERE id = $2', [msg.id, eventId]);
   console.log(`📤 Nuevo embed enviado para evento ${eventId}, message_id: ${msg.id}`);
 }
 
-async function summarizeHardcoreVote(client, event) {
-  if (!event || event.type !== 'hardcore') return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+function getHardcoreCompositionFooterText(event) {
+  if (!event || event.type !== 'hardcore') return null;
 
-  try {
-    const messageRes = await query('SELECT message_id FROM events WHERE id = $1', [event.id]);
-    const messageId = messageRes.rows[0]?.message_id;
-    if (!messageId || !client?.channels) {
-      return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
-    }
+  const effectiveComposition = event.composition == null ? 1 : Number(event.composition);
+  const compositionId = effectiveComposition === 1 ? 'B' : 'A';
+  const raw = compositionId === 'B'
+    ? '5DD 1 HOLY 1 TANK 1 SECOND LURER'
+    : '4DD 1 TANK 1 HOLY 1 DEBUFFER 1 SECOND LURER';
 
-    const channel = await client.channels.fetch(event.channel_id);
-    if (!channel) return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
-
-    const message = await channel.messages.fetch(messageId).catch(() => null);
-    if (!message) return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
-
-    const counts = new Map(HARDCORE_VOTE_REACTIONS.map(emoji => [emoji, 0]));
-    for (const reaction of message.reactions.cache.values()) {
-      const emoji = reaction.emoji?.name;
-      if (counts.has(emoji)) counts.set(emoji, reaction.count - 1);
-    }
-
-    const items = HARDCORE_VOTE_REACTIONS.map(emoji => `${emoji} ${counts.get(emoji) ?? 0}`).join('  ');
-    return `Votación acto: ${items}`;
-  } catch (err) {
-    console.warn(`⚠️ No se pudo resumir votación hardcore para evento ${event.id}:`, err.message || err);
-    return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
-  }
-}
-
-async function syncHardcoreVoteReactions(client, message, event) {
-  if (!message || !event || event.type !== 'hardcore') return;
-
-  try {
-    const existing = new Set(message.reactions.cache.keys());
-    for (const emoji of HARDCORE_VOTE_REACTIONS) {
-      if (!existing.has(emoji)) {
-        try {
-          await message.react(emoji);
-        } catch (err) {
-          if (err && err.code !== 10014) console.warn(`⚠️ No se pudo añadir reacción ${emoji} en evento ${event.id}:`, err.message || err);
-        }
-      }
-    }
-  } catch (err) {
-    console.warn(`⚠️ Error sincronizando reacciones hardcore para evento ${event.id}:`, err.message || err);
-  }
+  return raw;
 }
 
 // ==================== CONSTRUIR EMBED (CON ROLES) ====================
@@ -316,11 +276,6 @@ function buildEmbedWithRoles(event, summary, config, positionById) {
       inline: false
     });
   }
-
-  // Footer con info
-  embed.setFooter({
-    text: `Estado: ${event.status}`
-  });
 
   return embed;
 }
@@ -489,10 +444,6 @@ function buildEmbedNoRoles(event, summary, config, positionById, allParticipants
       inline: false
     });
   }
-
-  embed.setFooter({
-    text: `Estado: ${event.status}`
-  });
 
   return embed;
 }

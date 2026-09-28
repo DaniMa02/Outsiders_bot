@@ -133,8 +133,9 @@ export function getMaxRolesForEvent(event) {
   const config = event?.type ? EVENT_CONFIG[event.type] : null;
   if (!config) return {};
 
-  if (Array.isArray(config.compositions) && event?.composition != null) {
-    const compositionId = event.composition === 1 ? 'B' : 'A';
+  const effectiveComposition = event?.composition == null ? 1 : Number(event.composition);
+  if (Array.isArray(config.compositions)) {
+    const compositionId = effectiveComposition === 1 ? 'B' : 'A';
     const c = config.compositions.find(c => c.id === compositionId);
     if (c) return c.max_roles;
   }
@@ -143,16 +144,16 @@ export function getMaxRolesForEvent(event) {
 }
 
 /**
- * Etiqueta legible de la composición de un evento (ej: "A · 4 DD · 1 Holy · …").
- * Devuelve null si el tipo no tiene composiciones alternativas o el evento
- * no tiene una composición persistida.
+ * Etiqueta legible de la composición de un evento (ej: "5 DD · 1 Holy · …").
+ * Si el evento no tiene composición persistida, se usa la válida por defecto B.
  */
 export function getCompositionLabel(event) {
   const config = event?.type ? EVENT_CONFIG[event.type] : null;
-  if (!config || !Array.isArray(config.compositions) || event?.composition == null) return null;
-  const compositionId = event.composition === 1 ? 'B' : 'A';
+  if (!config || !Array.isArray(config.compositions)) return null;
+  const effectiveComposition = event?.composition == null ? 1 : Number(event.composition);
+  const compositionId = effectiveComposition === 1 ? 'B' : 'A';
   const c = config.compositions.find(c => c.id === compositionId);
-  return c ? `${c.id} · ${c.label}` : null;
+  return c ? c.label : null;
 }
 
 /**
@@ -161,8 +162,9 @@ export function getCompositionLabel(event) {
  */
 export function getToggleCompositionLabel(event) {
   const config = event?.type ? EVENT_CONFIG[event.type] : null;
-  if (!config || !Array.isArray(config.compositions) || event?.composition == null) return null;
-  const currentId = event.composition === 1 ? 'B' : 'A';
+  if (!config || !Array.isArray(config.compositions)) return null;
+  const effectiveComposition = event?.composition == null ? 1 : Number(event.composition);
+  const currentId = effectiveComposition === 1 ? 'B' : 'A';
   const next = config.compositions.find(c => c.id !== currentId);
   return next ? `🔄 Cambiar a ${next.id}` : null;
 }
