@@ -257,11 +257,7 @@ async function sendChannelReminder(client, eventId) {
     .join(' ');
 
   const config = EVENT_CONFIG[event.type];
-  const botVars = getBotVariables();
-  const roleId = config?.notify_role_var ? botVars[config.notify_role_var] : null;
-
   let content = `⏰ **Recordatorio: ${config?.icon || '•'} ${event.title}** empieza en 10 minutos.`;
-  if (roleId) content += `\n<@&${roleId}>`;
   if (userMentions) content += `\n${userMentions}`;
 
   // 4️⃣ Enviar al canal del evento

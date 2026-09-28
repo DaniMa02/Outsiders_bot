@@ -5,6 +5,8 @@ import {
   ButtonBuilder,
   ButtonStyle
 } from 'discord.js';
+
+export const HARDCORE_VOTE_REACTIONS = ['5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
 import { query } from '../db/database.js';
 import { getEvent, formatEventInfo } from './eventManager.js';
 import { getEventParticipantsSummary, getAllEventParticipantsWithPosition } from './eventService.js';
@@ -58,17 +60,26 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     // 3️⃣ Construir botones
     const buttonRows = buildEventButtons(event, config, allParticipants, cancelledGroups);
 
-    // 4️⃣ Si el evento tiene composición alternativa, añadirla al footer
+    // 4️⃣ Si el evento es hardcore, añadir el selector de acto al footer para votar
+    // de forma visible en el canal con reacciones y mostrar el resultado actual.
+    if (event.type === 'hardcore') {
+      const voteSummary = await summarizeHardcoreVote(client, event);
+      const existingFooter = embed.data.footer?.text || '';
+      const statusPart = existingFooter.includes('Estado:') ? existingFooter : `Estado: ${event.status}`;
+      embed.setFooter({ text: `${voteSummary} · ${statusPart}` });
+    }
+
+    // 5️⃣ Si el evento tiene composición alternativa, añadirla al footer
     const compLabel = getCompositionLabel(event);
     if (compLabel) {
       const existingFooter = embed.data.footer?.text || '';
-      const statusPart = existingFooter.startsWith('Estado:')
+      const statusPart = existingFooter.includes('Estado:')
         ? existingFooter
         : `Estado: ${event.status}`;
       embed.setFooter({ text: `Composición ${compLabel} · ${statusPart}` });
     }
 
-    // 4️⃣ Enviar o editar mensaje
+    // 6️⃣ Enviar o editar mensaje
     const channel = await client.channels.fetch(event.channel_id);
     if (!channel) {
       console.warn(`⚠️ Canal no encontrado: ${event.channel_id}`);
@@ -86,6 +97,7 @@ export async function createOrUpdateEventEmbed(client, eventId) {
           embeds: [embed],
           components: buttonRows
         });
+        await syncHardcoreVoteReactions(client, message, event);
         console.log(`✏️ Embed actualizado para evento ${eventId}`);
       } catch (err) {
         console.warn(`⚠️ No se pudo editar mensaje, enviando nuevo:`, err.message);
@@ -203,10 +215,60 @@ async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content 
   if (content) payload.content = content;
 
   const msg = await channel.send(payload);
+  await syncHardcoreVoteReactions(null, msg, { id: eventId, type: 'hardcore' });
 
   // Guardar message_id en BD
   await query('UPDATE events SET message_id = $1 WHERE id = $2', [msg.id, eventId]);
   console.log(`📤 Nuevo embed enviado para evento ${eventId}, message_id: ${msg.id}`);
+}
+
+async function summarizeHardcoreVote(client, event) {
+  if (!event || event.type !== 'hardcore') return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+
+  try {
+    const messageRes = await query('SELECT message_id FROM events WHERE id = $1', [event.id]);
+    const messageId = messageRes.rows[0]?.message_id;
+    if (!messageId || !client?.channels) {
+      return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+    }
+
+    const channel = await client.channels.fetch(event.channel_id);
+    if (!channel) return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+
+    const message = await channel.messages.fetch(messageId).catch(() => null);
+    if (!message) return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+
+    const counts = new Map(HARDCORE_VOTE_REACTIONS.map(emoji => [emoji, 0]));
+    for (const reaction of message.reactions.cache.values()) {
+      const emoji = reaction.emoji?.name;
+      if (counts.has(emoji)) counts.set(emoji, reaction.count - 1);
+    }
+
+    const items = HARDCORE_VOTE_REACTIONS.map(emoji => `${emoji} ${counts.get(emoji) ?? 0}`).join('  ');
+    return `Votación acto: ${items}`;
+  } catch (err) {
+    console.warn(`⚠️ No se pudo resumir votación hardcore para evento ${event.id}:`, err.message || err);
+    return 'Votación acto: 5️⃣ 0  6️⃣ 0  7️⃣ 0  8️⃣ 0  9️⃣ 0';
+  }
+}
+
+async function syncHardcoreVoteReactions(client, message, event) {
+  if (!message || !event || event.type !== 'hardcore') return;
+
+  try {
+    const existing = new Set(message.reactions.cache.keys());
+    for (const emoji of HARDCORE_VOTE_REACTIONS) {
+      if (!existing.has(emoji)) {
+        try {
+          await message.react(emoji);
+        } catch (err) {
+          if (err && err.code !== 10014) console.warn(`⚠️ No se pudo añadir reacción ${emoji} en evento ${event.id}:`, err.message || err);
+        }
+      }
+    }
+  } catch (err) {
+    console.warn(`⚠️ Error sincronizando reacciones hardcore para evento ${event.id}:`, err.message || err);
+  }
 }
 
 // ==================== CONSTRUIR EMBED (CON ROLES) ====================
@@ -532,7 +594,7 @@ function buildEventButtons(event, config, allParticipants = [], cancelledGroups 
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('event_manual_remove')
-        .setLabel('🗑️ Eliminar')
+        .setLabel('🗑️ Eliminar participante')
         .setStyle(ButtonStyle.Secondary)
     );
 
@@ -556,7 +618,7 @@ function buildEventButtons(event, config, allParticipants = [], cancelledGroups 
         .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('event_manual_remove')
-        .setLabel('🗑️ Eliminar')
+        .setLabel('🗑️ Eliminar participante')
         .setStyle(ButtonStyle.Secondary)
     );
     rows.push(manualRow);
