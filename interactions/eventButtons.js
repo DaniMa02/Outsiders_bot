@@ -68,9 +68,22 @@ export const handleEventButton = async (interaction) => {
 
   // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
   // porque showModal debe ser la primera respuesta de la interacción
+  if (customId.startsWith('event_create_form_')) {
+    try {
+      await handleCreateEventFormButton(interaction, customId);
+    } catch (err) {
+      console.error('❌ Error en botón de creación de evento:', err);
+      try {
+        if (!interaction.replied && !interaction.deferred) {
+          await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
+        }
+      } catch {}
+    }
+    return;
+  }
+
   if (
     ['event_manual_add', 'event_manual_move', 'event_manual_remove', 'event_edit', 'event_toggle_composition'].includes(customId)
-    || customId.startsWith('event_create_form_')
   ) {
     try {
       // Para event_edit se necesita el evento completo (con created_by) para permisos
