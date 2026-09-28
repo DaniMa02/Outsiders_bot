@@ -22,7 +22,7 @@ import https from "https";
 import { getEventConfig } from './config/eventConfig.js';
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm, handleSelfRoleSelect } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -553,6 +553,8 @@ client.on(Events.InteractionCreate, async interaction => {
     else if (interaction$.isStringSelectMenu()) {
       if (interaction$.customId.startsWith('event_add_role:')) {
         await handleAddRoleSelect(interaction$);
+      } else if (interaction$.customId.startsWith('event_self_role_select:')) {
+        await handleSelfRoleSelect(interaction$);
       } else if (interaction$.customId.startsWith('event_move_select_')) {
         await handleMoveSelect(interaction$);
       } else if (interaction$.customId.startsWith('event_remove_select_')) {

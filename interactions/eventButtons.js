@@ -43,6 +43,29 @@ export const handleEventButton = async (interaction) => {
     timestamp: new Date().toISOString()
   });
 
+  if (customId === 'event_change_role') {
+    try {
+      if (!message?.id) {
+        return await interaction.reply({ content: '❌ No se pudo localizar este evento.', ephemeral: true });
+      }
+
+      const eventData = await getEventFromMessageId(message.id);
+      if (!eventData) {
+        return await interaction.reply({ content: '❌ Este evento ya no existe.', ephemeral: true });
+      }
+
+      if (eventData.status === 'FINISHED') {
+        return await interaction.reply({ content: '❌ Este evento ya ha finalizado.', ephemeral: true });
+      }
+
+      await handleSelfRoleChangeButton(interaction, eventData);
+      return;
+    } catch (err) {
+      console.error('❌ Error en botón cambio de rol propio:', err);
+      return await interaction.reply({ content: `❌ ${err.message || 'Error interno'}`, ephemeral: true });
+    }
+  }
+
   // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
   // porque showModal debe ser la primera respuesta de la interacción
   if (
@@ -255,6 +278,47 @@ async function handleRoleButton(interaction, eventData, roleRequired, user, memb
   } catch (error) {
     return safeReply(interaction, `❌ ${error.message}`);
   }
+}
+
+async function handleSelfRoleChangeButton(interaction, eventData) {
+  const event = await getEvent(eventData.id);
+  if (!event || event.type === 'raid') {
+    return await interaction.reply({ content: '❌ Este botón solo está disponible para Hell y Hardcore.', ephemeral: true });
+  }
+
+  const maxRoles = getMaxRolesForEvent(event);
+  if (!Object.keys(maxRoles).length) {
+    return await interaction.reply({ content: '❌ Este evento no tiene roles configurados.', ephemeral: true });
+  }
+
+  const currentParticipantRes = await query(`
+    SELECT id, assigned_role, state
+    FROM event_participants
+    WHERE event_id = $1 AND discord_id = $2
+    LIMIT 1
+  `, [event.id, interaction.user.id]);
+
+  if (currentParticipantRes.rowCount === 0) {
+    return await interaction.reply({ content: '❌ Primero tienes que apuntarte al evento para cambiar de rol.', ephemeral: true });
+  }
+
+  const currentParticipant = currentParticipantRes.rows[0];
+  const validRoleOptions = Object.keys(maxRoles).map(role => ({
+    label: `${ROLE_EMOJIS[role] || '•'} ${ROLE_NAMES[role] || role.toUpperCase()}`,
+    value: role
+  }));
+
+  const roleSelect = new StringSelectMenuBuilder()
+    .setCustomId(`event_self_role_select:${event.id}`)
+    .setPlaceholder('Selecciona tu nuevo rol')
+    .setRequired(true)
+    .addOptions(validRoleOptions);
+
+  await interaction.reply({
+    content: `🔄 **${interaction.user.username}**, selecciona el rol al que quieres cambiarte en **${event.title}**.`,
+    components: [new ActionRowBuilder().addComponents(roleSelect)],
+    ephemeral: true
+  });
 }
 
 /**
@@ -1255,6 +1319,63 @@ export const handleAddRoleSelect = async (interaction) => {
 
   } catch (err) {
     console.error('❌ Error en handleAddRoleSelect:', err);
+    try {
+      await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+    } catch {}
+  }
+};
+
+export const handleSelfRoleSelect = async (interaction) => {
+  if (!interaction.customId.startsWith('event_self_role_select:')) return;
+
+  const eventId = parseInt(interaction.customId.split(':')[1], 10);
+  if (isNaN(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const selectedRole = interaction.values[0];
+  if (!selectedRole) {
+    return await safeReplySelect(interaction, '❌ Debes elegir un rol.');
+  }
+
+  try {
+    await interaction.deferUpdate();
+
+    const event = await getEvent(eventId);
+    if (!event || event.status !== 'OPEN') {
+      return await interaction.editReply({ content: '❌ Este evento ya no está abierto.', components: [] });
+    }
+
+    const currentParticipantRes = await query(`
+      SELECT id, assigned_role, state
+      FROM event_participants
+      WHERE event_id = $1 AND discord_id = $2
+      LIMIT 1
+    `, [eventId, interaction.user.id]);
+
+    if (currentParticipantRes.rowCount === 0) {
+      return await interaction.editReply({ content: '❌ No estás apuntado a este evento.', components: [] });
+    }
+
+    const currentParticipant = currentParticipantRes.rows[0];
+    if (currentParticipant.assigned_role === selectedRole) {
+      return await interaction.editReply({ content: `ℹ️ Ya estás en el rol **${selectedRole.toUpperCase()}**.`, components: [] });
+    }
+
+    await changeParticipantRole({
+      eventId,
+      participantId: currentParticipant.id,
+      newRole: selectedRole,
+      client: interaction.client,
+      onUpdateEmbed: createOrUpdateEventEmbed
+    });
+
+    await interaction.editReply({
+      content: `✅ Has cambiado tu rol a **${selectedRole.toUpperCase()}**.`,
+      components: []
+    });
+  } catch (err) {
+    console.error('❌ Error en handleSelfRoleSelect:', err);
     try {
       await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
     } catch {}

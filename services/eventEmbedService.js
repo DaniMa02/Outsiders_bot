@@ -271,7 +271,7 @@ function buildEmbedWithRoles(event, summary, config, positionById) {
       .join('\n');
 
     embed.addFields({
-      name: `🚫 ABSENCIAS (${summary.absence.count})`,
+      name: `🚫 AUSENCIAS (${summary.absence.count})`,
       value: absenceText,
       inline: false
     });
@@ -470,18 +470,21 @@ function buildEventButtons(event, config, allParticipants = [], cancelledGroups 
   }
 
   if (config.roles_required) {
-    // Hell / Hardcore: solo botones de rol + ausencia
-    // (el botón JOIN no tiene sentido: para unirse hay que elegir rol)
+    // Hell / Hardcore: botones para apuntarse/cambiar de rol + ausencia
     const roleButtons = buildRoleButtons(event, config);
     rows.push(roleButtons);
 
-    const absenceRow = new ActionRowBuilder().addComponents(
+    const selfRoleRow = new ActionRowBuilder().addComponents(
+      new ButtonBuilder()
+        .setCustomId('event_change_role')
+        .setLabel('🔄 Cambiar rol')
+        .setStyle(ButtonStyle.Secondary),
       new ButtonBuilder()
         .setCustomId('event_absence')
         .setLabel('❌ Ausencia')
         .setStyle(ButtonStyle.Danger)
     );
-    rows.push(absenceRow);
+    rows.push(selfRoleRow);
   } else {
     // Raid (sin roles): botón Unirse + Ausencia
     const joinAbsenceRow = new ActionRowBuilder().addComponents(
