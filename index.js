@@ -316,7 +316,7 @@ const runScheduledEventTemplate = async (client, template) => {
       datetime: nextDatetime.toISOString(),
       channelId: template.channel_id,
       createdBy: template.created_by || 'SYSTEM_SCHEDULED_EVENT',
-      composition: template.composition ?? 0
+      composition: template.type === 'hardcore' ? 1 : null
     });
 
     await createOrUpdateEventEmbed(client, event.id);

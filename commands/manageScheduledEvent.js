@@ -223,7 +223,7 @@ export const manageScheduledEvent = {
         `INSERT INTO scheduled_event_templates (type, title, channel_id, send_time, event_time, days_of_week, active, composition, created_by, created_at, updated_at)
          VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
          RETURNING *`,
-        [tipo, titulo, channelId, finalTrigger, finalEventTime, finalDays, activo !== null && activo !== undefined ? activo : true, 0, interaction.user.id]
+        [tipo, titulo, channelId, finalTrigger, finalEventTime, finalDays, activo !== null && activo !== undefined ? activo : true, tipo === 'hardcore' ? 1 : null, interaction.user.id]
       );
 
       const { loadScheduledEventTemplates, scheduleScheduledEvents } = await import('../index.js');

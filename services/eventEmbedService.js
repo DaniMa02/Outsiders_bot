@@ -14,6 +14,8 @@ import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent, getToggleComposi
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import { getBotVariables } from '../utils/botVariables.js';
 
+export const HARDCORE_VOTE_REACTIONS = ['5️⃣', '6️⃣', '7️⃣', '8️⃣', '9️⃣'];
+
 /**
  * SERVICIO DE EMBEDS DE EVENTOS
  * Responsable de:
@@ -86,13 +88,14 @@ export async function createOrUpdateEventEmbed(client, eventId) {
           embeds: [embed],
           components: buttonRows
         });
+        await syncHardcoreVoteReactions(message, event);
         console.log(`✏️ Embed actualizado para evento ${eventId}`);
       } catch (err) {
         console.warn(`⚠️ No se pudo editar mensaje, enviando nuevo:`, err.message);
-        await sendNewEmbedMessage(channel, embed, buttonRows, eventId, notifyContent);
+        await sendNewEmbedMessage(channel, embed, buttonRows, event, notifyContent);
       }
     } else {
-      await sendNewEmbedMessage(channel, embed, buttonRows, eventId, notifyContent);
+      await sendNewEmbedMessage(channel, embed, buttonRows, event, notifyContent);
     }
   } catch (err) {
     console.error(`❌ Error al crear/actualizar embed para evento ${eventId}:`, err);
@@ -195,7 +198,7 @@ function formatParticipantLine(p, position) {
 /**
  * Enviar nuevo mensaje con embed
  */
-async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content = null) {
+async function sendNewEmbedMessage(channel, embed, buttonRows, event, content = null) {
   const payload = {
     embeds: [embed],
     components: buttonRows
@@ -203,10 +206,30 @@ async function sendNewEmbedMessage(channel, embed, buttonRows, eventId, content 
   if (content) payload.content = content;
 
   const msg = await channel.send(payload);
+  await syncHardcoreVoteReactions(msg, event);
 
   // Guardar message_id en BD
-  await query('UPDATE events SET message_id = $1 WHERE id = $2', [msg.id, eventId]);
-  console.log(`📤 Nuevo embed enviado para evento ${eventId}, message_id: ${msg.id}`);
+  await query('UPDATE events SET message_id = $1 WHERE id = $2', [msg.id, event.id]);
+  console.log(`📤 Nuevo embed enviado para evento ${event.id}, message_id: ${msg.id}`);
+}
+
+async function syncHardcoreVoteReactions(message, event) {
+  if (event.type !== 'hardcore') return;
+
+  const existingReactions = new Set(
+    message.reactions.cache.map(reaction => reaction.emoji.name)
+  );
+
+  for (const emoji of HARDCORE_VOTE_REACTIONS) {
+    if (existingReactions.has(emoji)) continue;
+
+    try {
+      await message.react(emoji);
+      existingReactions.add(emoji);
+    } catch (err) {
+      console.warn(`⚠️ No se pudo añadir reacción ${emoji} en evento ${event.id}:`, err.message || err);
+    }
+  }
 }
 
 function getHardcoreCompositionFooterText(event) {

@@ -411,19 +411,17 @@ async function handleAbsenceButton(interaction, eventData, user, member) {
       try {
         const channel = await interaction.client.channels.fetch(eventData.channel_id);
         if (channel) {
-            const organizerRes = await query('SELECT created_by FROM events WHERE id = $1', [eventData.id]);
-            const createdById = organizerRes.rowCount > 0 ? organizerRes.rows[0].created_by : null;
-            const organizerMention = createdById && createdById !== 'SYSTEM_SCHEDULED_EVENT' ? `<@${createdById}>` : null;
-            await channel.send(
-              organizerMention
-                ? `⚠️ ${organizerMention} **${member.displayName}** se ha desapuntado con poco margen del evento (menos de 1h para el inicio).`
-                : `⚠️ **${member.displayName}** se ha desapuntado con poco margen del evento (menos de 1h para el inicio).`
-            );
-          }
-        } catch (err) {
-          console.warn('⚠️ No se pudo notificar:', err.message);
+          const adminAndLeaderMentions = getAdminAndLeaderMentions();
+          await channel.send(
+            adminAndLeaderMentions
+              ? `⚠️ ${adminAndLeaderMentions} **${member.displayName}** se ha desapuntado con poco margen del evento (menos de 1h para el inicio).`
+              : `⚠️ **${member.displayName}** se ha desapuntado con poco margen del evento (menos de 1h para el inicio).`
+          );
         }
+      } catch (err) {
+        console.warn('⚠️ No se pudo notificar:', err.message);
       }
+    }
 
     return safeReply(
       interaction,
@@ -564,14 +562,12 @@ async function handleCancelButton(interaction, eventData, user) {
       console.warn(`⚠️ No se pudo eliminar recordatorio del evento cancelado ${eventData.id}:`, err.message);
     }
 
-    // 5️⃣ Enviar mensaje de cancelación al canal con mención solo al organizador
+    // 5️⃣ Enviar mensaje de cancelación al canal con mención a Admin y Líder de Grupo
     const config = EVENT_CONFIG[fullEvent.type];
-    const organizerMention = fullEvent.created_by && fullEvent.created_by !== 'SYSTEM_SCHEDULED_EVENT'
-      ? `<@${fullEvent.created_by}>`
-      : null;
+    const adminAndLeaderMentions = getAdminAndLeaderMentions();
 
-    const cancelContent = organizerMention
-      ? `❌ **Evento cancelado: ${config?.icon || '•'} ${fullEvent.title}**\n${organizerMention}`
+    const cancelContent = adminAndLeaderMentions
+      ? `❌ **Evento cancelado: ${config?.icon || '•'} ${fullEvent.title}**\n${adminAndLeaderMentions}`
       : `❌ **Evento cancelado: ${config?.icon || '•'} ${fullEvent.title}**`;
 
     try {
@@ -635,9 +631,9 @@ async function handleCancelRaidGroupButton(interaction, eventData, groupNumber, 
     await createOrUpdateEventEmbed(interaction.client, eventData.id);
 
     const config = EVENT_CONFIG[event.type];
-    const organizerMention = event.created_by && event.created_by !== 'SYSTEM_SCHEDULED_EVENT' ? `<@${event.created_by}>` : null;
-    const cancelContent = organizerMention
-      ? `❌ **Grupo ${groupNumber} cancelado** en **${config?.icon || '•'} ${event.title}**\n${organizerMention}`
+    const adminAndLeaderMentions = getAdminAndLeaderMentions();
+    const cancelContent = adminAndLeaderMentions
+      ? `❌ **Grupo ${groupNumber} cancelado** en **${config?.icon || '•'} ${event.title}**\n${adminAndLeaderMentions}`
       : `❌ **Grupo ${groupNumber} cancelado** en **${config?.icon || '•'} ${event.title}**`;
 
     try {
@@ -727,6 +723,13 @@ function userCanManageManually(member) {
   const hasLider = liderGrupoRoleId && member.roles.cache.has(liderGrupoRoleId);
 
   return hasAdmin || hasLider;
+}
+
+function getAdminAndLeaderMentions() {
+  return [getBotVariable('ROLE_ADMIN'), getBotVariable('ROLE_LIDER_GRUPO')]
+    .filter(Boolean)
+    .map(roleId => `<@&${roleId}>`)
+    .join(' ');
 }
 
 /**

@@ -57,13 +57,14 @@ export async function createEvent({ type, title, datetime, channelId, createdBy,
   }
 
   // 5️⃣ Crear evento en BD
+  const effectiveComposition = composition ?? (type === 'hardcore' ? 1 : null);
   const event = await createEventDB({
     type,
     title,
     datetime: eventDate.toISOString(),
     channelId,
     createdBy,
-    composition
+    composition: effectiveComposition
   });
 
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
