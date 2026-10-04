@@ -6,6 +6,9 @@ import { finishEvent } from '../services/eventManager.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { getBotVariables } from '../utils/botVariables.js';
 import { deleteReminderMessage } from '../utils/eventReminders.js';
+import { getMaxRolesForEvent } from '../config/eventConfig.js';
+import { countActiveParticipantsByRole } from '../db/eventRepository.js';
+import { promoteReserveToActive } from '../services/eventService.js';
 
 /**
  * SCHEDULER DE CICLO DE VIDA DE EVENTOS
@@ -26,14 +29,68 @@ export const initEventLifecycleScheduler = (client) => {
   // Ejecutar cada minuto
   schedulerTask = cron.schedule('* * * * *', async () => {
     try {
+      await processGuestReservationCutoffs(client);
       await checkAndUpdateEventStates(client);
     } catch (err) {
       console.error('❌ Error en Event Lifecycle Scheduler:', err);
     }
   });
 
+  processGuestReservationCutoffs(client).catch(err => {
+    console.error('❌ Error aplicando el plazo de reservas de invitados:', err);
+  });
+
   console.log('✅ Event Lifecycle Scheduler inicializado (cada minuto)');
 };
+
+async function processGuestReservationCutoffs(client) {
+  const result = await query(`
+    SELECT *
+    FROM events
+    WHERE type = 'hardcore'
+      AND status = 'OPEN'
+      AND datetime > NOW()
+      AND guest_signup_cutoff_at <= NOW()
+      AND guest_cutoff_processed_at IS NULL
+    ORDER BY guest_signup_cutoff_at ASC
+    LIMIT 100
+  `);
+
+  for (const event of result.rows) {
+    try {
+      const reserveResult = await query(`
+        SELECT DISTINCT assigned_role
+        FROM event_participants
+        WHERE event_id = $1 AND state = 'RESERVE' AND assigned_role IS NOT NULL
+        ORDER BY assigned_role
+      `, [event.id]);
+      const maxRoles = getMaxRolesForEvent(event);
+
+      for (const { assigned_role: role } of reserveResult.rows) {
+        const roleLimit = maxRoles[role];
+        if (!roleLimit) continue;
+
+        while (await countActiveParticipantsByRole(event.id, role) < roleLimit) {
+          const promoted = await promoteReserveToActive(
+            event.id,
+            role,
+            client,
+            createOrUpdateEventEmbed
+          );
+          if (!promoted) break;
+          console.log(`🎟️ Invitados/reservas habilitados para el grupo principal: evento ${event.id}, rol ${role}`);
+        }
+      }
+
+      await query(
+        'UPDATE events SET guest_cutoff_processed_at = NOW() WHERE id = $1',
+        [event.id]
+      );
+    } catch (err) {
+      console.error(`❌ Error liberando reservas de invitados para evento ${event.id}:`, err);
+    }
+  }
+}
 
 /**
  * Detener scheduler

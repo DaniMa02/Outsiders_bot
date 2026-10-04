@@ -562,21 +562,29 @@ function buildEventButtons(event, config, allParticipants = [], cancelledGroups 
       new ButtonBuilder()
         .setCustomId('event_manual_remove')
         .setLabel('🗑️ Eliminar participante')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('event_manual_reserve')
+        .setLabel('📋 Mover a reserva')
+        .setStyle(ButtonStyle.Secondary),
+      new ButtonBuilder()
+        .setCustomId('event_manual_promote_reserve')
+        .setLabel('⬆️ Subir reserva')
         .setStyle(ButtonStyle.Secondary)
     );
+
+    rows.push(manualRow);
 
     // Hardcore: botón extra para cambiar entre composición A y B
     const toggleLabel = getToggleCompositionLabel(event);
     if (toggleLabel) {
-      manualRow.addComponents(
+      rows.push(new ActionRowBuilder().addComponents(
         new ButtonBuilder()
           .setCustomId('event_toggle_composition')
           .setLabel(toggleLabel)
           .setStyle(ButtonStyle.Secondary)
-      );
+      ));
     }
-
-    rows.push(manualRow);
   } else {
     const manualRow = new ActionRowBuilder().addComponents(
       new ButtonBuilder()

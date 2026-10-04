@@ -8,6 +8,7 @@ import {
   deleteEvent as deleteEventDB
 } from '../db/eventRepository.js';
 import { EVENT_CONFIG, EVENT_STATES, EMBED_DELETE_DELAY_MS, isValidEventType } from '../config/eventConfig.js';
+import { calculateGuestSignupCutoff } from '../utils/guestSignupPolicy.js';
 import { addEventToCache, removeEventFromCache } from '../utils/eventCache.js';
 import {
   REMINDER_OFFSET_MS,
@@ -34,7 +35,16 @@ import {
  * @param {object} [params.client] - Cliente Discord (necesario para programar recordatorio)
  * @returns {object} evento creado
  */
-export async function createEvent({ type, title, datetime, channelId, createdBy, client = null, composition = null }) {
+export async function createEvent({
+  type,
+  title,
+  datetime,
+  channelId,
+  createdBy,
+  client = null,
+  composition = null,
+  isScheduled = false
+}) {
   // 1️⃣ Validar tipo de evento
   if (!isValidEventType(type)) {
     throw new Error(`❌ Tipo de evento no válido: ${type}. Disponibles: ${Object.keys(EVENT_CONFIG).join(', ')}`);
@@ -58,13 +68,18 @@ export async function createEvent({ type, title, datetime, channelId, createdBy,
 
   // 5️⃣ Crear evento en BD
   const effectiveComposition = composition ?? (type === 'hardcore' ? 1 : null);
+  const createdAt = new Date();
   const event = await createEventDB({
     type,
     title,
     datetime: eventDate.toISOString(),
     channelId,
     createdBy,
-    composition: effectiveComposition
+    composition: effectiveComposition,
+    isScheduled,
+    guestSignupCutoffAt: type === 'hardcore'
+      ? calculateGuestSignupCutoff(eventDate, createdAt, isScheduled).toISOString()
+      : null
   });
 
   // 6️⃣ Añadir al caché de eventos OPEN (para autocomplete de /restore_event)
@@ -257,6 +272,9 @@ export async function updateEvent({ eventId, type, title, datetime }) {
   const fields = [];
   const values = [];
   let i = 1;
+  const currentEvent = (type !== undefined || datetime !== undefined)
+    ? await getEventById(eventId)
+    : null;
 
   if (type !== undefined) {
     fields.push(`type = $${i++}`);
@@ -267,8 +285,27 @@ export async function updateEvent({ eventId, type, title, datetime }) {
     values.push(title);
   }
   if (datetime !== undefined) {
+    const eventDate = datetime instanceof Date ? datetime : new Date(datetime);
     fields.push(`datetime = $${i++}`);
-    values.push(datetime instanceof Date ? datetime.toISOString() : datetime);
+    values.push(eventDate.toISOString());
+  }
+
+  if (type !== undefined || datetime !== undefined) {
+    const updatedType = type ?? currentEvent?.type;
+    let cutoff = null;
+    if (updatedType === 'hardcore') {
+      const eventDate = datetime !== undefined
+        ? (datetime instanceof Date ? datetime : new Date(datetime))
+        : new Date(currentEvent.datetime);
+      cutoff = calculateGuestSignupCutoff(
+        eventDate,
+        currentEvent.created_at,
+        currentEvent.is_scheduled
+      ).toISOString();
+    }
+    fields.push(`guest_signup_cutoff_at = $${i++}`);
+    values.push(cutoff);
+    fields.push('guest_cutoff_processed_at = NULL');
   }
 
   if (fields.length === 0) return null;

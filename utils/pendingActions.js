@@ -77,6 +77,50 @@ export const clearRemoveSelection = (userId, eventId) => {
   pendingActions.delete(`remove:${userId}:${eventId}`);
 };
 
+// ==================== RESERVE (1 select + confirm) ====================
+
+export const setReserveSelection = (userId, eventId, partial) => {
+  const key = `reserve:${userId}:${eventId}`;
+  const current = pendingActions.get(key) || {};
+  pendingActions.set(key, { ...current, ...partial, timestamp: Date.now() });
+};
+
+export const getReserveSelection = (userId, eventId) => {
+  const entry = pendingActions.get(`reserve:${userId}:${eventId}`);
+  if (!entry) return null;
+  if (isExpired(entry)) {
+    pendingActions.delete(`reserve:${userId}:${eventId}`);
+    return null;
+  }
+  return entry;
+};
+
+export const clearReserveSelection = (userId, eventId) => {
+  pendingActions.delete(`reserve:${userId}:${eventId}`);
+};
+
+// ==================== PROMOTE RESERVE (1 select + confirm) ====================
+
+export const setPromoteReserveSelection = (userId, eventId, partial) => {
+  const key = `promote-reserve:${userId}:${eventId}`;
+  const current = pendingActions.get(key) || {};
+  pendingActions.set(key, { ...current, ...partial, timestamp: Date.now() });
+};
+
+export const getPromoteReserveSelection = (userId, eventId) => {
+  const entry = pendingActions.get(`promote-reserve:${userId}:${eventId}`);
+  if (!entry) return null;
+  if (isExpired(entry)) {
+    pendingActions.delete(`promote-reserve:${userId}:${eventId}`);
+    return null;
+  }
+  return entry;
+};
+
+export const clearPromoteReserveSelection = (userId, eventId) => {
+  pendingActions.delete(`promote-reserve:${userId}:${eventId}`);
+};
+
 // ==================== LIMPIEZA ====================
 
 setInterval(() => {
@@ -87,4 +131,3 @@ setInterval(() => {
     }
   }
 }, 60 * 1000).unref();
-

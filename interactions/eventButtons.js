@@ -15,11 +15,18 @@ import { joinEvent, markEventAbsence, toggleEventComposition } from '../services
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
 import { createEvent as createEventInDB, getEvent } from '../services/eventManager.js';
 import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
-import { addManualParticipant, changeParticipantRole, removeParticipantFromEvent } from '../services/participantManager.js';
+import { addManualParticipant, changeParticipantRole, removeParticipantFromEvent, moveParticipantToReserve, promoteSelectedReserveToActive } from '../services/participantManager.js';
 import { cancelRaidGroup } from '../db/eventRepository.js';
 import { EVENT_CONFIG, isValidEventType, getEventConfig, getMaxRolesForEvent } from '../config/eventConfig.js';
+import { memberHasGuestRole } from '../utils/guestSignupPolicy.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
-import { setPendingAdd, getPendingAdd, clearPendingAdd, setMoveSelection, getMoveSelection, clearMoveSelection, setRemoveSelection, getRemoveSelection, clearRemoveSelection } from '../utils/pendingActions.js';
+import {
+  setPendingAdd, getPendingAdd, clearPendingAdd,
+  setMoveSelection, getMoveSelection, clearMoveSelection,
+  setRemoveSelection, getRemoveSelection, clearRemoveSelection,
+  setReserveSelection, getReserveSelection, clearReserveSelection,
+  setPromoteReserveSelection, getPromoteReserveSelection, clearPromoteReserveSelection
+} from '../utils/pendingActions.js';
 import { removeEventFromCache, addEventToCache } from '../utils/eventCache.js';
 import { cancelScheduledReminder, rescheduleReminder, deleteReminderMessage } from '../utils/eventReminders.js';
 import { parseDateTimeSpain, formatFechaMadrid, formatHoraMadrid } from '../utils/dateTime.js';
@@ -83,7 +90,7 @@ export const handleEventButton = async (interaction) => {
   }
 
   if (
-    ['event_manual_add', 'event_manual_move', 'event_manual_remove', 'event_edit', 'event_toggle_composition'].includes(customId)
+    ['event_manual_add', 'event_manual_move', 'event_manual_remove', 'event_manual_reserve', 'event_manual_promote_reserve', 'event_edit', 'event_toggle_composition'].includes(customId)
   ) {
     try {
       // Para event_edit se necesita el evento completo (con created_by) para permisos
@@ -151,6 +158,10 @@ export const handleEventButton = async (interaction) => {
           await handleManualAddButton(interaction, eventData);
         } else if (customId === 'event_manual_move') {
           await handleManualMoveButton(interaction, eventData);
+        } else if (customId === 'event_manual_reserve') {
+          await handleManualReserveButton(interaction, eventData);
+        } else if (customId === 'event_manual_promote_reserve') {
+          await handlePromoteReserveButton(interaction, eventData);
         } else {
           await handleManualRemoveButton(interaction, eventData);
         }
@@ -276,6 +287,7 @@ async function handleRoleButton(interaction, eventData, roleRequired, user, memb
       discordId: user.id,
       role: roleRequired,
       displayName: member.displayName,
+      isGuest: memberHasGuestRole(member),
       client: interaction.client,
       onUpdateEmbed: createOrUpdateEventEmbed
     });
@@ -963,6 +975,107 @@ async function handleManualRemoveButton(interaction, eventData) {
   }
 }
 
+async function handleManualReserveButton(interaction, eventData) {
+  if (!EVENT_CONFIG[eventData.type]?.roles_required) {
+    return await interaction.reply({
+      content: '❌ Solo se puede mover individualmente a reserva en eventos con roles.',
+      ephemeral: true
+    });
+  }
+
+  const res = await query(`
+    SELECT ep.id, ep.assigned_role, u.nickname
+    FROM event_participants ep
+    LEFT JOIN users u ON u.discord_id = ep.discord_id
+    WHERE ep.event_id = $1 AND ep.state = 'ACTIVE'
+    ORDER BY ep.joined_at ASC
+  `, [eventData.id]);
+
+  if (res.rowCount === 0) {
+    return await interaction.reply({ content: '❌ No hay participantes activos para mover.', ephemeral: true });
+  }
+  if (res.rowCount > 25) {
+    return await interaction.reply({ content: '❌ Demasiados participantes (>25), no se puede mostrar el selector.', ephemeral: true });
+  }
+
+  const participantSelect = new StringSelectMenuBuilder()
+    .setCustomId(`event_reserve_select_participant:${eventData.id}`)
+    .setPlaceholder('Selecciona participante activo')
+    .setRequired(true)
+    .addOptions(res.rows.map(participant => ({
+      label: truncateForModal(
+        `${participant.nickname || 'Sin nombre'} (${(participant.assigned_role || 'sin rol').toUpperCase()})`,
+        100
+      ),
+      value: String(participant.id)
+    })));
+
+  const confirmButton = new ButtonBuilder()
+    .setCustomId(`event_reserve_confirm:${eventData.id}`)
+    .setLabel('📋 Mover a reserva')
+    .setStyle(ButtonStyle.Secondary);
+
+  await interaction.reply({
+    content: `📋 **Mover a reserva** en **${eventData.title}**\nSelecciona un participante activo y confirma. El hueco quedará libre.`,
+    components: [
+      new ActionRowBuilder().addComponents(participantSelect),
+      new ActionRowBuilder().addComponents(confirmButton)
+    ],
+    ephemeral: true
+  });
+}
+
+async function handlePromoteReserveButton(interaction, eventData) {
+  if (!EVENT_CONFIG[eventData.type]?.roles_required) {
+    return await interaction.reply({
+      content: '❌ Solo se pueden promover reservas en eventos con roles.',
+      ephemeral: true
+    });
+  }
+
+  const res = await query(`
+    SELECT ep.id, ep.assigned_role, ep.is_guest, u.nickname
+    FROM event_participants ep
+    LEFT JOIN users u ON u.discord_id = ep.discord_id
+    WHERE ep.event_id = $1 AND ep.state = 'RESERVE'
+    ORDER BY ep.is_guest ASC, ep.joined_at ASC
+  `, [eventData.id]);
+
+  if (res.rowCount === 0) {
+    return await interaction.reply({ content: '❌ No hay reservas para promover.', ephemeral: true });
+  }
+  if (res.rowCount > 25) {
+    return await interaction.reply({ content: '❌ Demasiadas reservas (>25), no se puede mostrar el selector.', ephemeral: true });
+  }
+
+  const participantSelect = new StringSelectMenuBuilder()
+    .setCustomId(`event_promote_reserve_select:${eventData.id}`)
+    .setPlaceholder('Selecciona la reserva que ocupará el puesto')
+    .setRequired(true)
+    .addOptions(res.rows.map(participant => ({
+      label: truncateForModal(
+        `${participant.nickname || 'Sin nombre'} (${(participant.assigned_role || 'sin rol').toUpperCase()})`,
+        100
+      ),
+      value: String(participant.id),
+      description: participant.is_guest ? 'Invitado · sujeto al plazo de acceso' : 'Miembro'
+    })));
+
+  const confirmButton = new ButtonBuilder()
+    .setCustomId(`event_promote_reserve_confirm:${eventData.id}`)
+    .setLabel('⬆️ Subir al grupo principal')
+    .setStyle(ButtonStyle.Success);
+
+  await interaction.reply({
+    content: `⬆️ **Subir reserva** en **${eventData.title}**\nSelecciona quién ocupará su puesto y confirma. Solo se podrá subir si su rol tiene una plaza libre.`,
+    components: [
+      new ActionRowBuilder().addComponents(participantSelect),
+      new ActionRowBuilder().addComponents(confirmButton)
+    ],
+    ephemeral: true
+  });
+}
+
 // ==================== HANDLER DE SUBMIT DE MODAL ====================
 
 /**
@@ -1378,16 +1491,19 @@ export const handleSelfRoleSelect = async (interaction) => {
       return await interaction.editReply({ content: `ℹ️ Ya estás en el rol **${selectedRole.toUpperCase()}**.`, components: [] });
     }
 
-    await changeParticipantRole({
+    const result = await changeParticipantRole({
       eventId,
       participantId: currentParticipant.id,
       newRole: selectedRole,
       client: interaction.client,
-      onUpdateEmbed: createOrUpdateEventEmbed
+      onUpdateEmbed: createOrUpdateEventEmbed,
+      enforceGuestCutoff: true
     });
 
     await interaction.editReply({
-      content: `✅ Has cambiado tu rol a **${selectedRole.toUpperCase()}**.`,
+      content: result.state === 'RESERVE'
+        ? `✅ Has cambiado tu rol a **${selectedRole.toUpperCase()}** y sigues en **RESERVA** hasta que se libere el acceso de invitados.`
+        : `✅ Has cambiado tu rol a **${selectedRole.toUpperCase()}**.`,
       components: []
     });
   } catch (err) {
@@ -1514,6 +1630,118 @@ export const handleRemoveSelect = async (interaction) => {
  * Lee el participantId almacenado en memoria y lo borra.
  * customId: event_remove_confirm:<eventId>
  */
+export const handleReserveSelect = async (interaction) => {
+  if (!interaction.customId.startsWith('event_reserve_select_participant:')) return;
+  if (!userCanManageManually(interaction.member)) {
+    return await interaction.reply({ content: '❌ Sin permisos.', ephemeral: true });
+  }
+
+  const eventId = Number(interaction.customId.split(':')[1]);
+  if (!Number.isInteger(eventId)) {
+    return await interaction.reply({ content: '❌ Evento inválido.', ephemeral: true });
+  }
+
+  setReserveSelection(interaction.user.id, eventId, { participantId: interaction.values[0] });
+  await interaction.deferUpdate();
+};
+
+export const handleReserveConfirm = async (interaction) => {
+  if (!interaction.customId.startsWith('event_reserve_confirm:')) return;
+  if (!userCanManageManually(interaction.member)) {
+    return await safeReplySelect(interaction, '❌ Solo Admin y Líder de Grupo pueden usar este botón.');
+  }
+
+  const eventId = Number(interaction.customId.split(':')[1]);
+  if (!Number.isInteger(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const selection = getReserveSelection(interaction.user.id, eventId);
+  const participantId = Number(selection?.participantId);
+  if (!Number.isInteger(participantId)) {
+    return await safeReplySelect(interaction, '❌ Debes seleccionar un participante antes de confirmar.');
+  }
+
+  try {
+    await interaction.deferUpdate();
+    const participant = await moveParticipantToReserve({
+      eventId,
+      participantId,
+      client: interaction.client,
+      onUpdateEmbed: createOrUpdateEventEmbed
+    });
+    clearReserveSelection(interaction.user.id, eventId);
+
+    const participantName = participant.discord_id.startsWith('manual_')
+      ? `**${participant.discord_id}**`
+      : `<@${participant.discord_id}>`;
+    await interaction.editReply({
+      content: `✅ ${participantName} movido a **RESERVA**. El hueco queda libre.`,
+      components: []
+    });
+  } catch (err) {
+    console.error('❌ Error en handleReserveConfirm:', err);
+    await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+  }
+};
+
+export const handlePromoteReserveSelect = async (interaction) => {
+  if (!interaction.customId.startsWith('event_promote_reserve_select:')) return;
+  if (!userCanManageManually(interaction.member)) {
+    return await interaction.reply({ content: '❌ Sin permisos.', ephemeral: true });
+  }
+
+  const eventId = Number(interaction.customId.split(':')[1]);
+  if (!Number.isInteger(eventId)) {
+    return await interaction.reply({ content: '❌ Evento inválido.', ephemeral: true });
+  }
+
+  setPromoteReserveSelection(interaction.user.id, eventId, {
+    participantId: interaction.values[0]
+  });
+  await interaction.deferUpdate();
+};
+
+export const handlePromoteReserveConfirm = async (interaction) => {
+  if (!interaction.customId.startsWith('event_promote_reserve_confirm:')) return;
+  if (!userCanManageManually(interaction.member)) {
+    return await safeReplySelect(interaction, '❌ Solo Admin y Líder de Grupo pueden usar este botón.');
+  }
+
+  const eventId = Number(interaction.customId.split(':')[1]);
+  if (!Number.isInteger(eventId)) {
+    return await safeReplySelect(interaction, '❌ Evento inválido.');
+  }
+
+  const selection = getPromoteReserveSelection(interaction.user.id, eventId);
+  const participantId = Number(selection?.participantId);
+  if (!Number.isInteger(participantId)) {
+    return await safeReplySelect(interaction, '❌ Debes seleccionar una reserva antes de confirmar.');
+  }
+
+  try {
+    await interaction.deferUpdate();
+    const participant = await promoteSelectedReserveToActive({
+      eventId,
+      participantId,
+      client: interaction.client,
+      onUpdateEmbed: createOrUpdateEventEmbed
+    });
+    clearPromoteReserveSelection(interaction.user.id, eventId);
+
+    const participantName = participant.discord_id.startsWith('manual_')
+      ? `**${participant.discord_id}**`
+      : `<@${participant.discord_id}>`;
+    await interaction.editReply({
+      content: `✅ ${participantName} promovido a **ACTIVE** (${participant.assigned_role.toUpperCase()}).`,
+      components: []
+    });
+  } catch (err) {
+    console.error('❌ Error en handlePromoteReserveConfirm:', err);
+    await interaction.editReply({ content: `❌ ${err.message}`, components: [] });
+  }
+};
+
 export const handleRemoveConfirm = async (interaction) => {
   if (!interaction.customId.startsWith('event_remove_confirm:')) return;
 

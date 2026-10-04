@@ -16,6 +16,35 @@ export async function getEventById(eventId) {
   return res.rows[0] || null;
 }
 
+export async function ensureGuestReservationSchema() {
+  await query(`ALTER TABLE events
+    ADD COLUMN IF NOT EXISTS is_scheduled BOOLEAN NOT NULL DEFAULT FALSE,
+    ADD COLUMN IF NOT EXISTS guest_signup_cutoff_at TIMESTAMP,
+    ADD COLUMN IF NOT EXISTS guest_cutoff_processed_at TIMESTAMP`);
+  await query(`ALTER TABLE event_participants
+    ADD COLUMN IF NOT EXISTS is_guest BOOLEAN NOT NULL DEFAULT FALSE`);
+  await query(`UPDATE events
+    SET is_scheduled = TRUE,
+        guest_signup_cutoff_at = datetime - INTERVAL '2 hours'
+    WHERE type = 'hardcore'
+      AND created_by = 'SYSTEM_SCHEDULED_EVENT'
+      AND guest_signup_cutoff_at IS NULL`);
+  await query(`UPDATE events e
+    SET is_scheduled = TRUE,
+        guest_signup_cutoff_at = e.datetime - INTERVAL '2 hours'
+    FROM scheduled_event_templates t
+    WHERE e.type = 'hardcore'
+      AND e.status = 'OPEN'
+      AND e.datetime > NOW()
+      AND e.guest_signup_cutoff_at IS NULL
+      AND e.type = t.type
+      AND e.title = t.title
+      AND e.channel_id = t.channel_id`);
+  await query(`CREATE INDEX IF NOT EXISTS idx_events_guest_cutoff
+    ON events(type, status, guest_signup_cutoff_at)
+    WHERE guest_cutoff_processed_at IS NULL`);
+}
+
 /**
  * Obtener eventos OPEN con paginación
  */
@@ -52,12 +81,24 @@ export async function getEventsToFinish() {
 /**
  * Crear evento
  */
-export async function createEvent({ type, title, datetime, channelId, createdBy, composition = null }) {
+export async function createEvent({
+  type,
+  title,
+  datetime,
+  channelId,
+  createdBy,
+  composition = null,
+  isScheduled = false,
+  guestSignupCutoffAt = null
+}) {
   const res = await query(
-    `INSERT INTO events (type, title, datetime, channel_id, created_by, status, composition, created_at, updated_at)
-     VALUES ($1, $2, $3, $4, $5, $6, $7, NOW(), NOW())
-     RETURNING id, type, title, datetime, channel_id, status, composition`,
-    [type, title, datetime, channelId, createdBy, 'OPEN', composition]
+    `INSERT INTO events (
+       type, title, datetime, channel_id, created_by, status, composition,
+       is_scheduled, guest_signup_cutoff_at, created_at, updated_at
+     )
+     VALUES ($1, $2, $3, $4, $5, $6, $7, $8, $9, NOW(), NOW())
+     RETURNING *`,
+    [type, title, datetime, channelId, createdBy, 'OPEN', composition, isScheduled, guestSignupCutoffAt]
   );
   return res.rows[0];
 }
@@ -219,13 +260,19 @@ export async function countActiveParticipants(eventId) {
  * Agregar participante a evento
  * Normaliza el rol a minúsculas para evitar inconsistencias
  */
-export async function addParticipant({ eventId, discordId, state = 'ACTIVE', assignedRole = null }) {
+export async function addParticipant({
+  eventId,
+  discordId,
+  state = 'ACTIVE',
+  assignedRole = null,
+  isGuest = false
+}) {
   const normalizedRole = assignedRole ? assignedRole.toLowerCase() : null;
   const res = await query(
-    `INSERT INTO event_participants (event_id, discord_id, state, assigned_role, joined_at)
-     VALUES ($1, $2, $3, $4, NOW())
+    `INSERT INTO event_participants (event_id, discord_id, state, assigned_role, is_guest, joined_at)
+     VALUES ($1, $2, $3, $4, $5, NOW())
      RETURNING *`,
-    [eventId, discordId, state, normalizedRole]
+    [eventId, discordId, state, normalizedRole, isGuest]
   );
   return res.rows[0];
 }
@@ -245,14 +292,14 @@ export async function updateParticipantState(participantId, newState) {
  * Reactivar participante (ABSENCE → ACTIVE/RESERVE) actualizando estado y rol
  * Normaliza el rol a minúsculas
  */
-export async function reactivateParticipant({ participantId, state, assignedRole }) {
+export async function reactivateParticipant({ participantId, state, assignedRole, isGuest = null }) {
   const normalizedRole = assignedRole ? assignedRole.toLowerCase() : null;
   const res = await query(
     `UPDATE event_participants
-     SET state = $1, assigned_role = $2
-     WHERE id = $3
+     SET state = $1, assigned_role = $2, is_guest = COALESCE($3, is_guest)
+     WHERE id = $4
      RETURNING *`,
-    [state, normalizedRole, participantId]
+    [state, normalizedRole, isGuest, participantId]
   );
   return res.rows[0];
 }
@@ -278,17 +325,18 @@ export async function updateParticipantRole(participantId, role) {
  * @param {number[]} [excludeIds] - IDs de participantes a excluir (p.ej.
  *   los que ya probamos y no tenían capability, para no entrar en bucle).
  */
-export async function getFirstReserveForRole(eventId, roleNeeded, excludeIds = []) {
+export async function getFirstReserveForRole(eventId, roleNeeded, excludeIds = [], includeGuests = true) {
   if (excludeIds.length > 0) {
     const res = await query(
       `SELECT ep.*, u.nickname
        FROM event_participants ep
        LEFT JOIN users u ON u.discord_id = ep.discord_id
        WHERE ep.event_id = $1 AND ep.state = $2 AND ep.assigned_role = $3
-         AND NOT (ep.id = ANY($4::int[]))
-       ORDER BY ep.joined_at ASC
+         AND ($4::boolean OR ep.is_guest = FALSE)
+         AND NOT (ep.id = ANY($5::int[]))
+       ORDER BY ep.is_guest ASC, ep.joined_at ASC
        LIMIT 1`,
-      [eventId, 'RESERVE', roleNeeded, excludeIds]
+      [eventId, 'RESERVE', roleNeeded, includeGuests, excludeIds]
     );
     return res.rows[0] || null;
   }
@@ -298,9 +346,10 @@ export async function getFirstReserveForRole(eventId, roleNeeded, excludeIds = [
      FROM event_participants ep
      LEFT JOIN users u ON u.discord_id = ep.discord_id
      WHERE ep.event_id = $1 AND ep.state = $2 AND ep.assigned_role = $3
-     ORDER BY ep.joined_at ASC
+       AND ($4::boolean OR ep.is_guest = FALSE)
+     ORDER BY ep.is_guest ASC, ep.joined_at ASC
      LIMIT 1`,
-    [eventId, 'RESERVE', roleNeeded]
+    [eventId, 'RESERVE', roleNeeded, includeGuests]
   );
   return res.rows[0] || null;
 }

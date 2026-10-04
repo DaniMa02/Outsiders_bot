@@ -22,7 +22,7 @@ import https from "https";
 import { getEventConfig } from './config/eventConfig.js';
 
 // ==================== INTERACCIONES ====================
-import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm, handleSelfRoleSelect } from './interactions/eventButtons.js';
+import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm, handleSelfRoleSelect, handleReserveSelect, handleReserveConfirm, handlePromoteReserveSelect, handlePromoteReserveConfirm } from './interactions/eventButtons.js';
 
 // ==================== LISTENERS ====================
 import { handleGuildMemberUpdate } from './listeners/guildMemberUpdate.js';
@@ -37,6 +37,7 @@ import { loadEventsCache } from './utils/eventCache.js';
 import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
 import './utils/interactionAggregator.js';
 import { isMadridDST } from './utils/dateTime.js';
+import { ensureGuestReservationSchema } from './db/eventRepository.js';
 
 // ==================== SCHEDULER ====================
 import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
@@ -316,7 +317,8 @@ const runScheduledEventTemplate = async (client, template) => {
       datetime: nextDatetime.toISOString(),
       channelId: template.channel_id,
       createdBy: template.created_by || 'SYSTEM_SCHEDULED_EVENT',
-      composition: template.type === 'hardcore' ? 1 : null
+      composition: template.type === 'hardcore' ? 1 : null,
+      isScheduled: true
     });
 
     await createOrUpdateEventEmbed(client, event.id);
@@ -445,6 +447,7 @@ client.once(Events.ClientReady, async () => {
 
   // --- Cargar datos ---
   await loadBotVariables();
+  await ensureGuestReservationSchema();
   const botVars = getBotVariables();
   await loadEventsCache();
   await loadScheduledMessages();
@@ -543,6 +546,10 @@ client.on(Events.InteractionCreate, async interaction => {
           await handleMoveConfirm(interaction$);
         } else if (interaction$.customId.startsWith('event_remove_confirm:')) {
           await handleRemoveConfirm(interaction$);
+        } else if (interaction$.customId.startsWith('event_reserve_confirm:')) {
+          await handleReserveConfirm(interaction$);
+        } else if (interaction$.customId.startsWith('event_promote_reserve_confirm:')) {
+          await handlePromoteReserveConfirm(interaction$);
         } else {
           await handleEventButton(interaction$);
         }
@@ -559,6 +566,10 @@ client.on(Events.InteractionCreate, async interaction => {
         await handleMoveSelect(interaction$);
       } else if (interaction$.customId.startsWith('event_remove_select_')) {
         await handleRemoveSelect(interaction$);
+      } else if (interaction$.customId.startsWith('event_reserve_select_')) {
+        await handleReserveSelect(interaction$);
+      } else if (interaction$.customId.startsWith('event_promote_reserve_select:')) {
+        await handlePromoteReserveSelect(interaction$);
       }
     }
 

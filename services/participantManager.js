@@ -3,6 +3,8 @@ import { query } from '../db/database.js';
 import { getEvent } from './eventManager.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { promoteReserveToActive, normalizeRaidGroupStates } from './eventService.js';
+import { canUserFulfillRole } from '../config/eventRoleMapping.js';
+import { isGuestSignupRestricted } from '../utils/guestSignupPolicy.js';
 import {
   addParticipant,
   updateParticipantRole,
@@ -10,7 +12,8 @@ import {
   reactivateParticipant,
   deleteParticipant,
   countActiveParticipantsByRole,
-  countActiveParticipants
+  countActiveParticipants,
+  getUserCapabilities
 } from '../db/eventRepository.js';
 
 /**
@@ -127,7 +130,14 @@ export async function addManualParticipant({ eventId, name, role }) {
  * @param {function} [params.onUpdateEmbed] - Callback para refrescar embed
  * @returns {object} resultado del cambio
  */
-export async function changeParticipantRole({ eventId, participantId, newRole, client = null, onUpdateEmbed = null }) {
+export async function changeParticipantRole({
+  eventId,
+  participantId,
+  newRole,
+  client = null,
+  onUpdateEmbed = null,
+  enforceGuestCutoff = false
+}) {
   const event = await getEvent(eventId);
 
   if (event.status !== 'OPEN') {
@@ -147,7 +157,7 @@ export async function changeParticipantRole({ eventId, participantId, newRole, c
 
   // Verificar que el participante existe en este evento
   const existing = await query(`
-    SELECT id, assigned_role, state
+    SELECT id, assigned_role, state, is_guest
     FROM event_participants
     WHERE id = $1 AND event_id = $2
   `, [participantId, eventId]);
@@ -165,6 +175,21 @@ export async function changeParticipantRole({ eventId, participantId, newRole, c
   // Guardar info del rol antiguo ANTES de modificar nada
   const oldRole = part.assigned_role;
   const wasActive = part.state === PARTICIPANT_STATES.ACTIVE;
+
+  if (enforceGuestCutoff && part.is_guest && isGuestSignupRestricted(event)) {
+    await reactivateParticipant({
+      participantId,
+      state: PARTICIPANT_STATES.RESERVE,
+      assignedRole: newRole
+    });
+    if (wasActive && oldRole) {
+      await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+    }
+    if (onUpdateEmbed && client) {
+      onUpdateEmbed(client, eventId);
+    }
+    return { swapped: false, participantId, newRole, state: PARTICIPANT_STATES.RESERVE };
+  }
 
   // Comprobar si el rol destino está lleno
   const countForRole = await countActiveParticipantsByRole(eventId, newRole);
@@ -279,4 +304,107 @@ export async function removeParticipantFromEvent({ eventId, participantId, clien
   }
 
   return { removed: part, promoted };
+}
+
+/**
+ * Mover un participante activo a RESERVE sin promover a otra persona.
+ */
+export async function moveParticipantToReserve({ eventId, participantId, client = null, onUpdateEmbed = null }) {
+  const event = await getEvent(eventId);
+
+  if (event.status !== 'OPEN') {
+    throw new Error('❌ Este evento ya ha finalizado.');
+  }
+  if (event.type === 'raid') {
+    throw new Error('❌ No se puede mover individualmente a reserva en un evento Raid.');
+  }
+
+  const result = await query(`
+    SELECT id, discord_id, assigned_role, state
+    FROM event_participants
+    WHERE id = $1 AND event_id = $2
+  `, [participantId, eventId]);
+
+  if (result.rowCount === 0) {
+    throw new Error('❌ Participante no encontrado.');
+  }
+
+  const participant = result.rows[0];
+  if (participant.state !== PARTICIPANT_STATES.ACTIVE) {
+    throw new Error('❌ Solo se puede mover a reserva a un participante activo.');
+  }
+
+  await updateParticipantState(participantId, PARTICIPANT_STATES.RESERVE);
+  if (onUpdateEmbed && client) {
+    onUpdateEmbed(client, eventId);
+  }
+
+  console.log(`📋 Participante ${participantId} movido manualmente a RESERVE en evento ${eventId}`);
+  return participant;
+}
+
+export async function promoteSelectedReserveToActive({
+  eventId,
+  participantId,
+  client = null,
+  onUpdateEmbed = null
+}) {
+  const event = await getEvent(eventId);
+
+  if (event.status !== 'OPEN') {
+    throw new Error('❌ Este evento ya ha finalizado.');
+  }
+  if (!EVENT_CONFIG[event.type]?.roles_required) {
+    throw new Error('❌ Solo se pueden promover reservas en eventos con roles.');
+  }
+
+  const result = await query(`
+    SELECT id, discord_id, assigned_role, state, is_guest
+    FROM event_participants
+    WHERE id = $1 AND event_id = $2
+  `, [participantId, eventId]);
+
+  if (result.rowCount === 0) {
+    throw new Error('❌ Participante no encontrado.');
+  }
+
+  const participant = result.rows[0];
+  if (participant.state !== PARTICIPANT_STATES.RESERVE) {
+    throw new Error('❌ El participante seleccionado ya no está en reserva.');
+  }
+  if (!participant.assigned_role) {
+    throw new Error('❌ La reserva no tiene un rol asignado.');
+  }
+  if (participant.is_guest && isGuestSignupRestricted(event)) {
+    throw new Error('❌ Los invitados siguen en reserva hasta que se alcance el plazo de acceso.');
+  }
+
+  const maxRoles = getMaxRolesForEvent(event);
+  const roleLimit = maxRoles[participant.assigned_role];
+  if (!roleLimit) {
+    throw new Error('❌ El rol de esta reserva no está disponible en la composición actual.');
+  }
+  if (await countActiveParticipantsByRole(eventId, participant.assigned_role) >= roleLimit) {
+    throw new Error(`❌ El puesto de ${participant.assigned_role.toUpperCase()} ya está ocupado.`);
+  }
+
+  if (!participant.discord_id.startsWith('manual_')) {
+    const capabilities = await getUserCapabilities(participant.discord_id);
+    if (!canUserFulfillRole(capabilities, participant.assigned_role)) {
+      throw new Error(`❌ El participante ya no cumple los requisitos para ${participant.assigned_role.toUpperCase()}.`);
+    }
+  }
+
+  await updateParticipantState(participantId, PARTICIPANT_STATES.ACTIVE);
+
+  if (client && !participant.discord_id.startsWith('manual_')) {
+    const { notifyPromotionToActive } = await import('./notificationService.js');
+    await notifyPromotionToActive(client, participant.discord_id, event);
+  }
+  if (onUpdateEmbed && client) {
+    onUpdateEmbed(client, eventId);
+  }
+
+  console.log(`⬆️ Reserva ${participantId} promovida manualmente a ACTIVE en evento ${eventId}.`);
+  return participant;
 }

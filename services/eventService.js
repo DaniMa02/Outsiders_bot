@@ -15,6 +15,7 @@ import { getUserCapabilities } from '../db/eventRepository.js';
 import { getEvent, getEventMaxPlayers, eventHasRoles } from './eventManager.js';
 import { canUserFulfillRole } from '../config/eventRoleMapping.js';
 import { EVENT_CONFIG, PARTICIPANT_STATES, getMaxRolesForEvent } from '../config/eventConfig.js';
+import { isGuestSignupRestricted } from '../utils/guestSignupPolicy.js';
 
 /**
  * SERVICIO DE EVENTOS
@@ -66,7 +67,15 @@ async function processQueue() {
  * @param {object} params
  * @returns {object} participante creado/actualizado
  */
-export async function joinEvent({ eventId, discordId, role = null, displayName = null, client, onUpdateEmbed }) {
+export async function joinEvent({
+  eventId,
+  discordId,
+  role = null,
+  displayName = null,
+  isGuest = false,
+  client,
+  onUpdateEmbed
+}) {
   // 1️⃣ Obtener evento
   const event = await getEvent(eventId);
 
@@ -130,6 +139,25 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
       throw new Error(`❌ El rol ${role.toUpperCase()} no existe en la composición actual.`);
     }
     const maxForRole = maxRoles[role];
+    if (isGuest && isGuestSignupRestricted(event)) {
+      const result = await upsertParticipant({
+        eventId,
+        discordId,
+        state: PARTICIPANT_STATES.RESERVE,
+        assignedRole: role,
+        existingId: existing?.id,
+        isGuest,
+        client,
+        onUpdateEmbed
+      });
+
+      if (isChangingRole) {
+        await promoteReserveToActive(eventId, oldRole, client, onUpdateEmbed);
+      }
+
+      return result;
+    }
+
     const currentCountForRole = await countActiveParticipantsByRole(eventId, role);
 
     if (currentCountForRole >= maxForRole) {
@@ -145,6 +173,7 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
         state: PARTICIPANT_STATES.RESERVE,
         assignedRole: role,
         existingId: existing?.id,
+        isGuest,
         client,
         onUpdateEmbed
       });
@@ -175,6 +204,7 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
       state: PARTICIPANT_STATES.ACTIVE,
       assignedRole: role,
       existingId: existing?.id,
+      isGuest,
       client,
       onUpdateEmbed
     });
@@ -191,6 +221,7 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
       state: PARTICIPANT_STATES.RESERVE,
       assignedRole: role,
       existingId: existing?.id,
+      isGuest,
       client,
       onUpdateEmbed
     });
@@ -209,6 +240,7 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
     state: PARTICIPANT_STATES.ACTIVE,
     assignedRole: role,
     existingId: existing?.id,
+    isGuest,
     client,
     onUpdateEmbed
   });
@@ -223,13 +255,22 @@ export async function joinEvent({ eventId, discordId, role = null, displayName =
 /**
  * Insertar nuevo participante o actualizar uno existente (caso ABSENCE → ACTIVE/RESERVE)
  */
-async function upsertParticipant({ eventId, discordId, state, assignedRole, existingId, client, onUpdateEmbed }) {
+async function upsertParticipant({
+  eventId,
+  discordId,
+  state,
+  assignedRole,
+  existingId,
+  isGuest = false,
+  client,
+  onUpdateEmbed
+}) {
   let participant;
   if (existingId) {
-    participant = await reactivateParticipant({ participantId: existingId, state, assignedRole });
+    participant = await reactivateParticipant({ participantId: existingId, state, assignedRole, isGuest });
     console.log(`♻️ Usuario ${discordId} re-apuntado como ${state} a evento ${eventId} (rol: ${assignedRole || 'N/A'})`);
   } else {
-    participant = await addParticipant({ eventId, discordId, state, assignedRole });
+    participant = await addParticipant({ eventId, discordId, state, assignedRole, isGuest });
     console.log(`✅ Usuario ${discordId} apuntado como ${state} a evento ${eventId} (rol: ${assignedRole || 'N/A'})`);
   }
 
@@ -345,10 +386,12 @@ export async function markEventAbsence({ eventId, participantId, discordId, clie
 export async function promoteReserveToActive(eventId, roleNeeded, client, onUpdateEmbed) {
   const triedIds = [];
   let promoted = null;
+  const event = await getEvent(eventId);
+  const includeGuests = !isGuestSignupRestricted(event);
 
   while (true) {
     // 1️⃣ Obtener primer RESERVE que aún no hayamos probado
-    const reserve = await getFirstReserveForRole(eventId, roleNeeded, triedIds);
+    const reserve = await getFirstReserveForRole(eventId, roleNeeded, triedIds, includeGuests);
 
     if (!reserve) {
       // No hay más RESERVEs elegibles
@@ -383,7 +426,6 @@ export async function promoteReserveToActive(eventId, roleNeeded, client, onUpda
     // Si se promovió a alguien, delegar la notificación DM a notificationService
     try {
       if (client && !promoted.discord_id.startsWith('manual_')) {
-        const event = await getEvent(eventId);
         if (event && (event.type === 'hell' || event.type === 'hardcore')) {
           // Importar dinámicamente para evitar ciclos en require/import si hace falta
           const { notifyPromotionToActive } = await import('./notificationService.js');

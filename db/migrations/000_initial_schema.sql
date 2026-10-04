@@ -56,6 +56,9 @@ CREATE TABLE IF NOT EXISTS events (
   created_by               TEXT NOT NULL,
   status                   TEXT NOT NULL DEFAULT 'OPEN',
   composition              SMALLINT DEFAULT 0,
+  is_scheduled             BOOLEAN NOT NULL DEFAULT FALSE,
+  guest_signup_cutoff_at   TIMESTAMP,
+  guest_cutoff_processed_at TIMESTAMP,
   embed_deletion_scheduled BOOLEAN DEFAULT FALSE,
   created_at               TIMESTAMP DEFAULT NOW(),
   updated_at               TIMESTAMP DEFAULT NOW()
@@ -100,6 +103,7 @@ CREATE TABLE IF NOT EXISTS event_participants (
   discord_id    TEXT NOT NULL,
   state         TEXT NOT NULL DEFAULT 'ACTIVE',
   assigned_role TEXT,
+  is_guest      BOOLEAN NOT NULL DEFAULT FALSE,
   joined_at     TIMESTAMP NOT NULL DEFAULT NOW()
 );
 
