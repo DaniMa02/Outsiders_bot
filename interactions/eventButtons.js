@@ -13,11 +13,11 @@ import { getUserCapabilities } from '../db/eventRepository.js';
 import { canUserFulfillRole } from '../config/eventRoleMapping.js';
 import { joinEvent, markEventAbsence, toggleEventComposition } from '../services/eventService.js';
 import { createOrUpdateEventEmbed } from '../services/eventEmbedService.js';
-import { createEvent as createEventInDB, getEvent } from '../services/eventManager.js';
-import { getBotVariables, getBotVariable } from '../utils/botVariables.js';
+import { getEvent } from '../services/eventManager.js';
+import { getBotVariable } from '../utils/botVariables.js';
 import { addManualParticipant, changeParticipantRole, removeParticipantFromEvent, moveParticipantToReserve, promoteSelectedReserveToActive } from '../services/participantManager.js';
 import { cancelRaidGroup } from '../db/eventRepository.js';
-import { EVENT_CONFIG, isValidEventType, getEventConfig, getMaxRolesForEvent } from '../config/eventConfig.js';
+import { EVENT_CONFIG, getMaxRolesForEvent } from '../config/eventConfig.js';
 import { memberHasGuestRole } from '../utils/guestSignupPolicy.js';
 import { ROLE_EMOJIS, ROLE_NAMES } from '../config/eventRoleMapping.js';
 import {
@@ -71,22 +71,6 @@ export const handleEventButton = async (interaction) => {
       console.error('❌ Error en botón cambio de rol propio:', err);
       return await interaction.reply({ content: `❌ ${err.message || 'Error interno'}`, ephemeral: true });
     }
-  }
-
-  // 1️⃣ BOTONES QUE ABREN MODAL: NO se hace deferReply
-  // porque showModal debe ser la primera respuesta de la interacción
-  if (customId.startsWith('event_create_form_')) {
-    try {
-      await handleCreateEventFormButton(interaction, customId);
-    } catch (err) {
-      console.error('❌ Error en botón de creación de evento:', err);
-      try {
-        if (!interaction.replied && !interaction.deferred) {
-          await interaction.reply({ content: `❌ ${err.message}`, ephemeral: true });
-        }
-      } catch {}
-    }
-    return;
   }
 
   if (
@@ -190,10 +174,6 @@ export const handleEventButton = async (interaction) => {
 
     setImmediate(async () => {
       try {
-        if (customId.startsWith('event_create_form_')) {
-          return await handleCreateEventFormButton(interaction, customId);
-        }
-
         // 1️⃣ Obtener evento desde message_id
         const eventButtonIds = ['event_join', 'event_absence', 'event_cancel'];
         const isEventButton = eventButtonIds.includes(customId)
@@ -445,67 +425,6 @@ async function handleAbsenceButton(interaction, eventData, user, member) {
   }
 }
 
-/**
- * Manejar botón CANCELAR evento.
- * Solo el creador del evento (event.created_by === user.id) puede cancelarlo.
- * - Marca el evento como FINISHED en la DB (reusa estado, no añade nuevos)
- * - Borra el embed del canal
- * - Envía un mensaje al canal con la mención al rol del tipo de evento
- */
-async function handleCreateEventFormButton(interaction, customId) {
-  try {
-    const type = customId.replace('event_create_form_', '');
-    if (!isValidEventType(type)) {
-      return await safeReply(interaction, '❌ Tipo de evento no válido.');
-    }
-
-    if (!userCanCreateEvent(interaction.member)) {
-      return await safeReply(interaction, '❌ Solo Admin y Líder de Grupo pueden crear eventos.');
-    }
-
-    const config = getEventConfig(type);
-    const modal = new ModalBuilder()
-      .setCustomId(`event_modal_create:${type}`)
-      .setTitle(`Crear ${config.label}`);
-
-    modal.addComponents(
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('title')
-          .setLabel('Título')
-          .setPlaceholder(`Ej: ${config.label} Team A`)
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMinLength(3)
-          .setMaxLength(100)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('fecha')
-          .setLabel('Fecha DD/MM')
-          .setPlaceholder('15/08')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(5)
-      ),
-      new ActionRowBuilder().addComponents(
-        new TextInputBuilder()
-          .setCustomId('hora')
-          .setLabel('Hora HH:MM')
-          .setPlaceholder('20:00')
-          .setStyle(TextInputStyle.Short)
-          .setRequired(true)
-          .setMaxLength(5)
-      )
-    );
-
-    await interaction.showModal(modal);
-  } catch (err) {
-    console.error('❌ Error en handleCreateEventFormButton:', err);
-    return await safeReply(interaction, `❌ ${err.message}`);
-  }
-}
-
 async function handleCancelButton(interaction, eventData, user) {
   try {
     // 1️⃣ Obtener el evento completo (necesitamos created_by y message_id)
@@ -748,15 +667,6 @@ function getAdminAndLeaderMentions() {
  * Comprobar si el miembro puede editar/cancelar un evento:
  * admin, lidergrupo, o el creador del evento
  */
-function userCanCreateEvent(member) {
-  const adminRoleId = getBotVariable('ROLE_ADMIN');
-  const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
-
-  if (adminRoleId && member.roles.cache.has(adminRoleId)) return true;
-  if (liderGrupoRoleId && member.roles.cache.has(liderGrupoRoleId)) return true;
-  return false;
-}
-
 function userCanManageEvent(member, event) {
   const adminRoleId = getBotVariable('ROLE_ADMIN');
   const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
@@ -1085,11 +995,6 @@ async function handlePromoteReserveButton(interaction, eventData) {
 export const handleEventModalSubmit = async (interaction) => {
   const { customId } = interaction;
 
-  const createMatch = customId.match(/^event_modal_create:(.+)$/);
-  if (createMatch) {
-    return await handleCreateModalSubmit(interaction, createMatch[1]);
-  }
-
   const match = customId.match(/^event_modal_(add|move):(\d+)$/);
   if (!match) {
     return safeReplyModal(interaction, '❌ Modal mal formado.');
@@ -1120,69 +1025,6 @@ export const handleEventModalSubmit = async (interaction) => {
     return safeReplyModal(interaction, `❌ ${err.message}`);
   }
 };
-
-async function handleCreateModalSubmit(interaction, type) {
-  if (!isValidEventType(type)) {
-    return safeReplyModal(interaction, '❌ Tipo de evento no válido.');
-  }
-
-  const botVars = getBotVariables();
-  const adminRoleId = getBotVariable('ROLE_ADMIN');
-  const liderGrupoRoleId = getBotVariable('ROLE_LIDER_GRUPO');
-  const hasAdminPermission = interaction.member.roles.cache.has(adminRoleId);
-  const hasLiderPermission = liderGrupoRoleId && interaction.member.roles.cache.has(liderGrupoRoleId);
-
-  if (!hasAdminPermission && !hasLiderPermission) {
-    return await interaction.reply({ content: '❌ Solo Admin y Líder de Grupo pueden crear eventos.', ephemeral: true });
-  }
-
-  await interaction.deferReply({ ephemeral: true });
-
-  try {
-    const titulo = interaction.fields.getTextInputValue('title').trim();
-    const fechaStr = interaction.fields.getTextInputValue('fecha').trim();
-    const horaStr = interaction.fields.getTextInputValue('hora').trim();
-
-    if (!titulo || !fechaStr || !horaStr) {
-      return await interaction.editReply({ content: '❌ Debes completar título, fecha y hora.' });
-    }
-
-    const { datetime, error: parseError } = parseDateTimeSpain(fechaStr, horaStr);
-    if (parseError) {
-      return await interaction.editReply({ content: `❌ ${parseError}` });
-    }
-    if (datetime <= new Date()) {
-      return await interaction.editReply({ content: '❌ No puedes crear eventos en el pasado.' });
-    }
-
-    const config = getEventConfig(type);
-    const channelId = botVars[config.channel_var];
-    if (!channelId) {
-      return await interaction.editReply({
-        content: `❌ Canal para eventos **${config.label}** no configurado. Añade la variable \`${config.channel_var}\`.`
-      });
-    }
-
-    const event = await createEventInDB({
-      type,
-      title: titulo,
-      datetime: datetime.toISOString(),
-      channelId,
-      createdBy: interaction.user.id,
-      client: interaction.client,
-      composition: type === 'hardcore' ? 1 : null
-    });
-
-    await createOrUpdateEventEmbed(interaction.client, event.id);
-
-    return await interaction.editReply({
-      content: `✅ Evento creado: **${titulo}** (${type.toUpperCase()})\n📅 ${datetime.toLocaleString('es-ES', { timeZone: 'Europe/Madrid' })}`
-    });
-  } catch (err) {
-    console.error('❌ Error en handleCreateModalSubmit:', err);
-    return await interaction.editReply({ content: `❌ ${err.message}` });
-  }
-}
 
 async function handleAddModalSubmit(interaction, eventId) {
   await interaction.deferReply({ ephemeral: true });

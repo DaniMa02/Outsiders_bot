@@ -13,13 +13,12 @@ import { listScheduledEvents } from './commands/listScheduledEvents.js';
 import { debugMyPermissions } from './commands/debugMyPermissions.js';
 
 // ==================== DISCORD.JS ====================
-import { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder, ButtonBuilder, ButtonStyle } from 'discord.js';
+import { Client, GatewayIntentBits, Events, REST, Routes, ActionRowBuilder } from 'discord.js';
 import dotenv from 'dotenv';
 import cron from 'node-cron';
 import express from 'express';
 import { query } from './db/database.js';
 import https from "https";
-import { getEventConfig } from './config/eventConfig.js';
 
 // ==================== INTERACCIONES ====================
 import { handleEventButton, handleEventModalSubmit, handleAddRoleSelect, handleMoveSelect, handleMoveConfirm, handleEditModalSubmit, handleRemoveSelect, handleRemoveConfirm, handleSelfRoleSelect, handleReserveSelect, handleReserveConfirm, handlePromoteReserveSelect, handlePromoteReserveConfirm } from './interactions/eventButtons.js';
@@ -97,12 +96,8 @@ const loadScheduledEventTemplates = async () => {
       FROM scheduled_event_templates
       WHERE active = TRUE
       ORDER BY
-        CASE 
-          WHEN event_time IS NULL THEN 1
-          ELSE 0
-        END,
-        event_time ASC,
-        send_time ASC,
+        event_time::time ASC NULLS LAST,
+        send_time::time ASC,
         created_at ASC
     `);
     scheduledEventTemplates = res.rows;
@@ -157,65 +152,70 @@ const sendMessage = async (channelId, content, botVars) => {
   }
 };
 
-const createEventTypeButton = (type) => {
-  const config = getEventConfig(type);
-  if (!config) return null;
-
-  return new ButtonBuilder()
-    .setCustomId(`event_create_form_${type}`)
-    .setLabel(`${config.icon} ${config.label}`)
-    .setStyle(ButtonStyle.Primary);
-};
-
-const getChannelCreateType = (channelId, botVars) => {
-  const typeByChannel = {
-    [botVars.HELL_CHANNEL_ID]: 'hell',
-    [botVars.HARDCORE_CHANNEL_ID]: 'hardcore',
-    [botVars.RAID_CHANNEL_ID]: 'raid'
-  };
-
-  return typeByChannel[channelId] || null;
-};
-
-const ensurePermanentCreateButtons = async (channelId) => {
+const removePermanentCreateButtons = async (channelId) => {
   try {
     if (!channelId) return;
     const channel = await client.channels.fetch(channelId);
     if (!channel || !channel.isTextBased?.()) return;
 
-    const botVars = getBotVariables();
-    const eventType = getChannelCreateType(channelId, botVars);
-    if (!eventType) return;
-
-    const button = createEventTypeButton(eventType);
-    if (!button) return;
-
-    const row = new ActionRowBuilder().addComponents(button);
-
-    const existingMessages = await channel.messages.fetch({ limit: 25 });
-    const existing = existingMessages.find(msg =>
-      msg.author.id === client.user.id &&
-      msg.components?.some(r => r.components?.some(comp => comp.customId === `event_create_form_${eventType}`))
-    );
-
-    if (existing) {
-      await existing.edit({ components: [row] });
-      try {
-        await existing.pin();
-      } catch (pinErr) {
-        console.warn(`⚠️ No se pudo fijar el botón de creación en ${channelId}:`, pinErr?.message || pinErr);
-      }
-      return;
+    const messages = new Map();
+    const recentMessages = await channel.messages.fetch({ limit: 100 });
+    for (const message of recentMessages.values()) {
+      messages.set(message.id, message);
     }
 
-    const sent = await channel.send({ components: [row] });
-    try {
-      await sent.pin();
-    } catch (pinErr) {
-      console.warn(`⚠️ No se pudo fijar el botón de creación en ${channelId}:`, pinErr?.message || pinErr);
+    if (typeof channel.messages.fetchPinned === 'function') {
+      try {
+        const pinnedMessages = await channel.messages.fetchPinned();
+        for (const message of pinnedMessages.values()) {
+          messages.set(message.id, message);
+        }
+      } catch (err) {
+        console.warn(`⚠️ No se pudieron revisar los mensajes fijados en ${channelId}:`, err?.message || err);
+      }
+    }
+
+    const createButtonIds = new Set([
+      'event_create_form_hell',
+      'event_create_form_hardcore',
+      'event_create_form_raid'
+    ]);
+
+    for (const message of messages.values()) {
+      if (message.author.id !== client.user.id) continue;
+
+      let removedButton = false;
+      const components = message.components
+        .map(row => {
+          const retained = row.components.filter(component => {
+            if (createButtonIds.has(component.customId)) {
+              removedButton = true;
+              return false;
+            }
+            return true;
+          });
+          return retained.length > 0
+            ? new ActionRowBuilder().addComponents(...retained)
+            : null;
+        })
+        .filter(Boolean);
+
+      if (!removedButton) continue;
+
+      const isCreateButtonOnlyMessage = !message.content
+        && message.embeds.length === 0
+        && message.attachments.size === 0
+        && components.length === 0;
+
+      if (isCreateButtonOnlyMessage) {
+        await message.delete();
+      } else {
+        await message.edit({ components });
+      }
+      console.log(`🧹 Retirado botón obsoleto de creación de eventos en ${channelId}`);
     }
   } catch (err) {
-    console.warn('⚠️ No se pudo asegurar botón permanente de creación en el canal:', err?.message || err);
+    console.warn('⚠️ No se pudo retirar un botón antiguo de creación de eventos:', err?.message || err);
   }
 };
 
@@ -223,6 +223,11 @@ const ensurePermanentCreateButtons = async (channelId) => {
 const parseClockPart = (value, fallback) => {
   const numericValue = Number(value);
   return Number.isNaN(numericValue) ? fallback : numericValue;
+};
+
+const getClockMinutes = (value) => {
+  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value || '');
+  return match ? Number(match[1]) * 60 + Number(match[2]) : Number.MAX_SAFE_INTEGER;
 };
 
 // ---------------- Scheduler mensajes ----------------
@@ -332,28 +337,47 @@ const scheduleScheduledEvents = () => {
   scheduledEventJobs.forEach(job => job.stop());
   scheduledEventJobs = [];
 
-  scheduledEventTemplates.forEach(template => {
-    if (!template.active) return;
-    if (!template.send_time) return;
+  const templateGroups = new Map();
+  for (const template of scheduledEventTemplates) {
+    if (!template.active || !template.send_time) continue;
 
-    const [hourStr, minuteStr] = (template.send_time || '22:00').split(':');
+    const normalizedDays = (template.days_of_week || '0,1,2,3,4,5,6')
+      .split(',')
+      .map(day => day.trim())
+      .filter(Boolean)
+      .sort((a, b) => Number(a) - Number(b))
+      .join(',');
+    const groupKey = `${template.send_time}|${normalizedDays}`;
+    if (!templateGroups.has(groupKey)) {
+      templateGroups.set(groupKey, []);
+    }
+    templateGroups.get(groupKey).push(template);
+  }
+
+  for (const templates of templateGroups.values()) {
+    templates.sort((a, b) =>
+      getClockMinutes(a.event_time || '22:00') - getClockMinutes(b.event_time || '22:00')
+      || new Date(a.created_at) - new Date(b.created_at)
+    );
+
+    const [hourStr, minuteStr] = (templates[0].send_time || '22:00').split(':');
     const hour = parseClockPart(hourStr, 22);
     const minute = parseClockPart(minuteStr, 0);
-    const cronDays = (template.days_of_week || '0,1,2,3,4,5,6')
-      .split(',')
-      .map(d => d.trim())
-      .filter(Boolean)
-      .join(',');
-
+    const cronDays = (templates[0].days_of_week || '0,1,2,3,4,5,6')
+      .split(',').map(day => day.trim()).filter(Boolean).join(',');
     const cronPattern = `${minute} ${hour} * * ${cronDays}`;
-    console.log(`🕐 Programando evento recurrente: ${template.type} | ${template.title} | trigger=${template.send_time} | cron=${cronPattern} | tz=Europe/Madrid`);
+    console.log(`🕐 Programando ${templates.length} evento(s) recurrente(s): trigger=${templates[0].send_time} | cron=${cronPattern} | tz=Europe/Madrid`);
     const job = cron.schedule(
       cronPattern,
-      () => runScheduledEventTemplate(client, template),
+      async () => {
+        for (const template of templates) {
+          await runScheduledEventTemplate(client, template);
+        }
+      },
       { timezone: 'Europe/Madrid' }
     );
     scheduledEventJobs.push(job);
-  });
+  }
 };
 
 
@@ -455,9 +479,13 @@ client.once(Events.ClientReady, async () => {
   scheduleAllMessages();
   scheduleScheduledEvents();
 
-  const channelIdsToSeed = [botVars.HELL_CHANNEL_ID, botVars.HARDCORE_CHANNEL_ID, botVars.RAID_CHANNEL_ID].filter(Boolean);
+  const channelIdsToSeed = [...new Set([
+    botVars.HELL_CHANNEL_ID,
+    botVars.HARDCORE_CHANNEL_ID,
+    botVars.RAID_CHANNEL_ID
+  ].filter(Boolean))];
   for (const channelId of channelIdsToSeed) {
-    await ensurePermanentCreateButtons(channelId);
+    await removePermanentCreateButtons(channelId);
   }
 
   // ==================== ONE-TIME SYNC ====================
