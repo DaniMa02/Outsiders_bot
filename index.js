@@ -303,7 +303,7 @@ const runScheduledEventTemplate = async (client, template) => {
        WHERE type = $1
          AND title = $2
          AND channel_id = $3
-         AND date(datetime) = date($4)
+         AND datetime = $4::timestamp
          AND status = 'OPEN'`,
       [template.type, template.title, template.channel_id, nextDatetime.toISOString()]
     );
