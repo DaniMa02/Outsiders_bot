@@ -29,7 +29,7 @@ export const HARDCORE_VOTE_REACTIONS = ['5️⃣', '6️⃣', '7️⃣', '8️�
 /**
  * Crear o actualizar embed de evento
  */
-export async function createOrUpdateEventEmbed(client, eventId) {
+export async function createOrUpdateEventEmbed(client, eventId, { throwOnError = false } = {}) {
   try {
     // 1️⃣ Obtener evento y sus participantes
     const event = await getEvent(eventId);
@@ -66,15 +66,15 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     if (event.type === 'hardcore') {
       const compLabel = getHardcoreCompositionFooterText(event);
       embed.setFooter({ text: compLabel || '5DD 1 HOLY 1 TANK 1 SECOND LURER' });
-    } else {
-      embed.setFooter({ text: '' });
     }
 
     // 6️⃣ Enviar o editar mensaje
     const channel = await client.channels.fetch(event.channel_id);
     if (!channel) {
-      console.warn(`⚠️ Canal no encontrado: ${event.channel_id}`);
-      return;
+      throw new Error(`Canal de Discord no encontrado: ${event.channel_id}`);
+    }
+    if (!channel.isTextBased?.() || typeof channel.send !== 'function') {
+      throw new Error(`El canal ${event.channel_id} no permite enviar mensajes`);
     }
 
     // El content con mención al rol solo se incluye en envíos NUEVOS,
@@ -99,6 +99,7 @@ export async function createOrUpdateEventEmbed(client, eventId) {
     }
   } catch (err) {
     console.error(`❌ Error al crear/actualizar embed para evento ${eventId}:`, err);
+    if (throwOnError) throw err;
   }
 }
 

@@ -139,7 +139,7 @@ export const createEvent = {
       });
 
       // 🔹 Generar y enviar embed
-      await createOrUpdateEventEmbed(interaction.client, event.id);
+      await createOrUpdateEventEmbed(interaction.client, event.id, { throwOnError: true });
 
       // 🔹 Responder
       return await interaction.editReply({

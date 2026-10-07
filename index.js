@@ -326,7 +326,7 @@ const runScheduledEventTemplate = async (client, template) => {
       isScheduled: true
     });
 
-    await createOrUpdateEventEmbed(client, event.id);
+    await createOrUpdateEventEmbed(client, event.id, { throwOnError: true });
     console.log(`✅ Evento programado enviado: ${template.type.toUpperCase()} - ${template.title} (${nextDatetime.toISOString()})`);
   } catch (err) {
     console.error('❌ Error ejecutando evento programado:', err);

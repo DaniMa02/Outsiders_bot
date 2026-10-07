@@ -96,7 +96,7 @@ export const restoreEvent = {
       // 4️⃣ Regenerar embed.
       // Si message_id apunta a un mensaje borrado en Discord, createOrUpdateEventEmbed
       // lo detecta y crea uno nuevo automáticamente.
-      await createOrUpdateEventEmbed(interaction.client, eventId);
+      await createOrUpdateEventEmbed(interaction.client, eventId, { throwOnError: true });
 
       return await interaction.editReply({
         content: wasFinished

@@ -104,7 +104,7 @@ export const sendTestEvent = {
       });
 
       // Enviar embed al canal especificado
-      await createOrUpdateEventEmbed(interaction.client, event.id);
+      await createOrUpdateEventEmbed(interaction.client, event.id, { throwOnError: true });
 
       return await interaction.editReply({ content: `✅ Evento de prueba creado en <#${channel.id}>: **${titulo}** (${tipo.toUpperCase()})` });
 
