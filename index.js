@@ -37,6 +37,7 @@ import { withEphemeralAutoDelete } from './utils/interactionHelpers.js';
 import './utils/interactionAggregator.js';
 import { isMadridDST } from './utils/dateTime.js';
 import { ensureGuestReservationSchema } from './db/eventRepository.js';
+import { groupScheduledEventTemplates } from './utils/scheduledEventOrdering.js';
 
 // ==================== SCHEDULER ====================
 import { initEventLifecycleScheduler, checkAndFixEventStatesOnStartup, initEmbedCleanupScheduler } from './scheduler/eventLifecycleScheduler.js';
@@ -225,11 +226,6 @@ const parseClockPart = (value, fallback) => {
   return Number.isNaN(numericValue) ? fallback : numericValue;
 };
 
-const getClockMinutes = (value) => {
-  const match = /^([01]\d|2[0-3]):([0-5]\d)$/.exec(value || '');
-  return match ? Number(match[1]) * 60 + Number(match[2]) : Number.MAX_SAFE_INTEGER;
-};
-
 // ---------------- Scheduler mensajes ----------------
 const scheduleAllMessages = () => {
   const botVars = getBotVariables();
@@ -337,29 +333,7 @@ const scheduleScheduledEvents = () => {
   scheduledEventJobs.forEach(job => job.stop());
   scheduledEventJobs = [];
 
-  const templateGroups = new Map();
-  for (const template of scheduledEventTemplates) {
-    if (!template.active || !template.send_time) continue;
-
-    const normalizedDays = (template.days_of_week || '0,1,2,3,4,5,6')
-      .split(',')
-      .map(day => day.trim())
-      .filter(Boolean)
-      .sort((a, b) => Number(a) - Number(b))
-      .join(',');
-    const groupKey = `${template.send_time}|${normalizedDays}`;
-    if (!templateGroups.has(groupKey)) {
-      templateGroups.set(groupKey, []);
-    }
-    templateGroups.get(groupKey).push(template);
-  }
-
-  for (const templates of templateGroups.values()) {
-    templates.sort((a, b) =>
-      getClockMinutes(a.event_time || '22:00') - getClockMinutes(b.event_time || '22:00')
-      || new Date(a.created_at) - new Date(b.created_at)
-    );
-
+  for (const templates of groupScheduledEventTemplates(scheduledEventTemplates)) {
     const [hourStr, minuteStr] = (templates[0].send_time || '22:00').split(':');
     const hour = parseClockPart(hourStr, 22);
     const minute = parseClockPart(minuteStr, 0);
