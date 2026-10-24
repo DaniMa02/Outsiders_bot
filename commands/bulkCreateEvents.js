@@ -89,7 +89,7 @@ export const bulkCreateEvents = {
         });
 
         // Enviar embed al canal correspondiente
-        await createOrUpdateEventEmbed(interaction.client, event.id);
+        await createOrUpdateEventEmbed(interaction.client, event.id, { throwOnError: true });
 
         created.push({ id: event.id, type: item.type, title: item.title, channelId });
         // Pequeño delay para no saturar a Discord
